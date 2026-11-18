@@ -26,6 +26,8 @@
 
 Solution to synchronize video playback across multiple instances of mpv, VLC, MPC-HC, MPC-BE and mplayer2 over the Internet.
 
+This fork is designing automatic room recovery for unreliable connections. [Desktop reconnection specification](docs/desktop-reconnection.md)
+
 ## Official website
 https://syncplay.pl
 
