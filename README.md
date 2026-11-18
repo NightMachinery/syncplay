@@ -26,7 +26,9 @@
 
 Solution to synchronize video playback across multiple instances of mpv, VLC, MPC-HC, MPC-BE and mplayer2 over the Internet.
 
-This fork is designing automatic room recovery for unreliable connections. [Desktop reconnection specification](docs/desktop-reconnection.md)
+This fork automatically rejoins a desktop room after an interrupted connection. An unsuccessful first connection leaves the window and player open. Use **File → Reconnect** or type `retry` in the console.
+
+To run from this checkout, install the dependencies with `python -m pip install -r requirements.txt -r requirements_gui.txt`, then run `python syncplayClient.py` and choose your server, room and media player. See the [desktop recovery behavior and verification](docs/desktop-reconnection.md).
 
 ## Official website
 https://syncplay.pl

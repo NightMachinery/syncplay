@@ -38,16 +38,28 @@ class ConsoleUI(threading.Thread):
 
     def run(self):
         try:
-            while True:
-                data = input()
-                data = data.rstrip('\n\r')
-                if not self.promptMode.isSet():
-                    self.PromptResult = data
-                    self.promptMode.set()
-                elif self._syncplayClient:
-                    self.executeCommand(data)
+            if sys.stdin.isatty():
+                self._readCommands(iter(input, None))
+            else:
+                # A pipe may still be open when the player exits. Avoid holding
+                # Python's buffered stdin lock during interpreter shutdown.
+                with open(sys.stdin.fileno(), "rb", buffering=0, closefd=False) as stream:
+                    encoding = sys.stdin.encoding or "utf-8"
+                    self._readCommands(line.decode(encoding, "replace") for line in stream)
         except EOFError:
             pass
+
+    def _readCommands(self, lines):
+        for data in lines:
+            data = data.rstrip("\n\r")
+            if not self.promptMode.isSet():
+                self.PromptResult = data
+                self.promptMode.set()
+            elif self._syncplayClient:
+                from twisted.internet import reactor
+                reactor.callFromThread(self.executeCommand, data)
+                if data.split(" ", 1)[0].lower() == "quit":
+                    return
 
     def updateRoomName(self, room=""):
         pass
@@ -100,11 +112,8 @@ class ConsoleUI(threading.Thread):
         pass
 
     def showMessage(self, message, noTimestamp=False, isMotd=False):
-        message = message.encode(sys.stdout.encoding, 'replace')
-        try:
-            message = message.decode('utf-8')
-        except UnicodeEncodeError:
-            pass
+        encoding = sys.stdout.encoding or "utf-8"
+        message = message.encode(encoding, "replace").decode(encoding)
         if noTimestamp:
             print(message)
         else:
@@ -114,7 +123,14 @@ class ConsoleUI(threading.Thread):
         print(message)
 
     def showErrorMessage(self, message, criticalerror=False):
-        print("ERROR:\t" + message)
+        self.showMessage("ERROR:\t" + message, noTimestamp=True)
+
+    def connectionStatus(self, message, pending, logMessage, error):
+        if logMessage:
+            if error:
+                self.showErrorMessage(logMessage)
+            else:
+                self.showMessage(logMessage)
 
     def setSSLMode(self, sslMode, sslInformation):
         pass
@@ -157,7 +173,14 @@ class ConsoleUI(threading.Thread):
         command = re.match(constants.UI_COMMAND_REGEX, data)
         if not command:
             return
-        if command.group('command') in constants.COMMANDS_UNDO:
+        name = command.group('command').lower()
+        if name == "retry":
+            self._syncplayClient.manualReconnect()
+        elif name == "cancel":
+            self._syncplayClient.cancelReconnect()
+        elif name == "quit":
+            self._syncplayClient.stop()
+        elif command.group('command') in constants.COMMANDS_UNDO:
             tmp_pos = self._syncplayClient.getPlayerPosition()
             self._syncplayClient.setPosition(self._syncplayClient.playerPositionBeforeLastSeek)
             self._syncplayClient.playerPositionBeforeLastSeek = tmp_pos
@@ -258,6 +281,7 @@ class ConsoleUI(threading.Thread):
             self.showMessage(getMessage("commandlist-notification/seek"), True)
             self.showMessage(getMessage("commandlist-notification/offset"), True)
             self.showMessage(getMessage("commandlist-notification/help"), True)
+            self.showMessage(getMessage("commandlist-notification/recovery"), True)
             self.showMessage(getMessage("commandlist-notification/toggle"), True)
             self.showMessage(getMessage("commandlist-notification/create"), True)
             self.showMessage(getMessage("commandlist-notification/auth"), True)

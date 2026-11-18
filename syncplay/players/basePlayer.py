@@ -3,12 +3,8 @@ from syncplay import constants
 
 class BasePlayer(object):
 
-    '''
-    This method is supposed to
-    execute updatePlayerStatus(paused, position) on client
-    Given the arguments: boolean paused and float position in seconds
-    '''
-    def askForStatus(self):
+    def askForStatus(self, report):
+        """Report the player's observed pause state and position in seconds."""
         raise NotImplementedError()
 
     '''

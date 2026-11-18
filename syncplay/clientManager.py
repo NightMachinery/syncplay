@@ -1,3 +1,4 @@
+import time
 
 from syncplay import ui
 from syncplay.messages import getMessage
@@ -7,6 +8,10 @@ from syncplay.ui.ConfigurationGetter import ConfigurationGetter
 class SyncplayClientManager(object):
     def run(self):
         config = ConfigurationGetter().getConfiguration()
+        from twisted.internet import reactor
+        # Keep the existing epoch for calls scheduled during GUI setup.
+        clockOffset = reactor.seconds() - time.monotonic()
+        reactor.seconds = lambda: clockOffset + time.monotonic()
         from syncplay.client import SyncplayClient  # Imported later, so the proper reactor is installed
         menuBar = config['menuBar'] if 'menuBar' in config else None
         interface = ui.getUi(graphical=not config["noGui"], passedBar=menuBar)

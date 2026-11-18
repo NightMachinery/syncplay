@@ -224,6 +224,7 @@ class RoomConnection:
             self._holdCall.cancel()
         self._startAfterStop = True
         self._beginOutage()
+        self._status("dial", announce=False)
         self._stopService()
 
     def cancel(self, exiting=False):

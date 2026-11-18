@@ -52,3 +52,27 @@ Use a deterministic reactor clock, injected jitter and a controllable endpoint/p
 4. Exercise refusal at startup, TLS/Hello timeout, Hello with no usable state, repeated pre-Hello drops, wrong password and invalid certificate. Before first admission, advance the clock past several retry intervals and verify exactly one dial, a readable error in the normal log, an open player and window, and one new dial after manual Retry. After admission, assert bounded backoff for transient failures and a held state for explicit rejections. Verify certificate rejection sends no plaintext Hello. Retry after correction must work.
 5. Trigger automatic timeout and repeated Retry now together, then cancel, change room, or quit in each phase. Deliver a stale connection-lost callback and delayed player response after a new connection succeeds. Verify no duplicate socket, timer, notification or player process and no rejoin after cancellation or quit.
 6. Deliver in two atomic commits where practical: connection lifecycle and its regression tests, followed by room restoration, user controls, docs and their tests. Push to the desktop fork. Record automated results and any manual checks that could not be run. Implementation is ready when both the reconnecting viewer and the unaffected peer meet the checks above.
+
+## Using the desktop fork
+
+- **File → Reconnect** retries the current connection. **File → Cancel connection** ends an attempt or stops waiting for the next one. In console mode, use `retry`, `cancel` and `quit`.
+- If the first connection fails, the message log shows the endpoint and failure phase. To change the address or password, use Syncplay's startup configuration. When the current settings are valid, use Reconnect in the open window.
+- After admission, Syncplay retries until you cancel or quit. The status shows the target room and recovery phase. Pause on leave is off in a fresh configuration and keeps its saved value in an existing configuration.
+- An explicit empty server playlist clears the client playlist. You can load a playlist explicitly from the File menu or start with `--load-playlist-from-file`. Media supplied as the positional startup argument opens locally, including when the first connection fails.
+- For a server that offers TLS, Syncplay requires a Twisted version that can report a verified handshake to the client. When a server explicitly replies that TLS is unavailable, Syncplay continues with its existing plaintext protocol.
+
+## Verification
+
+@OpenAI, 18 November 2026.
+
+Run the deterministic recovery tests from the repository root with `python -m unittest discover -s tests -v`.
+
+The macOS loopback comparisons used the stock server, the desktop entry point, mpv and synthetic media. All three baselines (v1.7.5, v1.7.6 and 49e2a1b) entered the exit prompt on a refused initial connection. All three recovered from a clean close in their original desktop process. v1.7.6 and 49e2a1b recovered when the relay dropped server-to-client traffic. One v1.7.5 run had no second connection within 22 seconds. A repeat recovered. The path behind the reported unstable-network exit remains unconfirmed.
+
+The fork passed 22 deterministic tests. These covered the combined dial deadline, TLS and Hello deadlines, ping-only replies, DNS errors, backoff and its reset, 1,002 consecutive failures, wake with an overdue retry, stale callbacks, cancellation, fatal rejection, managed-room credentials, readiness and authoritative empty playlists. The player tests covered the default and both saved pause preferences, stale reports and unavailable media.
+
+With two real desktop clients and a stock loopback server, one viewer switched from room A to room B before the relay interrupted its connection. The peer remained connected throughout. The runs covered a 3-second clean break with the default preference, 25 seconds of dropped incoming traffic with the saved preference off, and 60 seconds of dropped outgoing traffic with the saved preference on. The returning viewer followed the peer's pause and seek. It loaded the newly selected media and converged within the one-second sync tolerance. The 60-second run received a deliberately cleared playlist. TCP traces showed zero stale seeks, unpauses or cached playlist writes through convergence.
+
+The desktop entry point also passed against a restarted stock server with an empty room, a server with an untrusted certificate, and a server with a test certificate in the client's trust store. A player-initiated Quit ended the session cleanly. The certificate rejection test observed zero plaintext Hello messages in the deterministic wire trace.
+
+The macOS Qt test ran offscreen on macOS 14.3.1 with Python 3.12 and PySide6 6.8.3. PySide6 6.12 could not load on that host. Qt and console smoke tests checked the normal refusal log, an open player, Retry, Cancel, rejoin and Quit. The suite exercised a simulated wake and DNS failures. Physical suspend, network-interface switching, native on-screen Qt and the VLC, MPC and MPlayer adapters remain unverified.

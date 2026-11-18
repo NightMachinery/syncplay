@@ -1193,17 +1193,20 @@ class MainWindow(QtWidgets.QMainWindow):
 
     @needsClient
     def reconnectToServer(self):
-        """
-        Trigger a manual reconnection using the client's built-in retry mechanism.
-        This is simpler and more reliable than doing a complete restart.
-        """
-        try:
-            if self._syncplayClient:
-                self._syncplayClient.manualReconnect()
+        self._syncplayClient.manualReconnect()
+
+    @needsClient
+    def cancelConnection(self):
+        self._syncplayClient.cancelReconnect()
+
+    def connectionStatus(self, message, pending, logMessage, error):
+        self.connectionStatusLabel.setText(message)
+        self.cancelConnectionAction.setEnabled(pending)
+        if logMessage:
+            if error:
+                self.showErrorMessage(logMessage)
             else:
-                self.showErrorMessage(getMessage("connection-failed-notification"))
-        except Exception as e:
-            self.showErrorMessage(getMessage("reconnect-failed-error").format(str(e)))
+                self.showMessage(logMessage)
 
     def exitSyncplay(self):
         self._syncplayClient.stop()
@@ -1929,6 +1932,9 @@ class MainWindow(QtWidgets.QMainWindow):
 
         window.reconnectAction = window.fileMenu.addAction(QtGui.QPixmap(resourcespath + "reconnect.png"), getMessage("reconnect-menu-label"))
         window.reconnectAction.triggered.connect(self.reconnectToServer)
+        window.cancelConnectionAction = window.fileMenu.addAction(getMessage("cancel-connection-menu-label"))
+        window.cancelConnectionAction.triggered.connect(self.cancelConnection)
+        window.cancelConnectionAction.setEnabled(False)
 
         window.exitAction = window.fileMenu.addAction(getMessage("exit-menu-label"))
         if isMacOS():
@@ -2347,6 +2353,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self.loadMenubar(self, passedBar)
         self.populateMenubar(self)
         self.addMainFrame(self)
+        self.connectionStatusLabel = QtWidgets.QLabel()
+        self.connectionStatusLabel.setTextFormat(Qt.PlainText)
+        self.connectionStatusLabel.setWordWrap(True)
+        self.connectionStatusLabel.setSizePolicy(QtWidgets.QSizePolicy.Ignored, QtWidgets.QSizePolicy.Preferred)
+        self.statusBar().addPermanentWidget(self.connectionStatusLabel, 1)
         self.loadSettings()
         self.setWindowIcon(QtGui.QPixmap(resourcespath + "syncplay.png"))
         if isWindows() and IsPySide6:

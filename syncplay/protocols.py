@@ -1,5 +1,7 @@
 # coding:utf8
 import json
+import math
+import re
 import time
 from datetime import datetime
 from functools import wraps
@@ -11,6 +13,7 @@ from twisted.python.versions import Version
 from zope.interface.declarations import implementer
 
 import syncplay
+from syncplay import utils
 from syncplay.constants import PING_MOVING_AVERAGE_WEIGHT, CONTROLLED_ROOMS_MIN_VERSION, USER_READY_MIN_VERSION, SHARED_PLAYLIST_MIN_VERSION, CHAT_MIN_VERSION, UNKNOWN_UI_MODE
 from syncplay.messages import getMessage
 from syncplay.utils import meetsMinVersion
@@ -74,94 +77,137 @@ class JSONCommandProtocol(LineReceiver):
 
 @implementer(IHandshakeListener)
 class SyncClientProtocol(JSONCommandProtocol):
-    def __init__(self, client):
+    def __init__(self, client, generation):
         self._client = client
+        self.generation = generation
         self.clientIgnoringOnTheFly = 0
         self.serverIgnoringOnTheFly = 0
         self.logged = False
         self.hadFirstPlaylistIndex = False
-        self.hadFirstStateUpdate = False
         self._pingService = PingService()
+        self._earlyMessages = []
+        self._sentHello = False
+        self._startedTLS = False
+        self._tlsVerified = False
+        self._awaitingRoom = False
 
     def showDebugMessage(self, line):
-        self._client.ui.showDebugMessage(line)
+        pass  # Client wire messages may contain passwords and private media details.
+
+    def _isCurrent(self):
+        return self._client.connection.isCurrent(self)
+
+    def lineReceived(self, line):
+        if not self._isCurrent():
+            return
+        try:
+            line = line.decode("utf-8").strip()
+            if not line:
+                return
+            messages = json.loads(line)
+        except (UnicodeError, ValueError):
+            self.dropWithError("protocol")
+            return
+        if not isinstance(messages, dict):
+            self.dropWithError("protocol")
+            return
+        self.handleMessages(messages)
+
+    def lineLengthExceeded(self, line):
+        self.dropWithError("protocol")
+
+    def handleMessages(self, messages):
+        for command, value in messages.items():
+            if not self._isCurrent():
+                break
+            if command in ("Set", "State", "List", "Chat") and not self.logged:
+                # Stock servers send room data while handling Hello, before their reply.
+                if not self._sentHello or len(self._earlyMessages) >= 128:
+                    self.dropWithError("protocol")
+                    break
+                self._earlyMessages.append((command, value))
+            else:
+                try:
+                    super().handleMessages({command: value})
+                except (AttributeError, IndexError, KeyError, TypeError, ValueError):
+                    self.dropWithError("protocol")
+
+    def sendMessage(self, message):
+        if self._isCurrent():
+            super().sendMessage(message)
 
     def connectionMade(self):
-        self.hadFirstPlaylistIndex = False
-        self.hadFirstStateUpdate = False
-        self._client.initProtocol(self)
-        if self._client._clientSupportsTLS:
-            if self._client._serverSupportsTLS:
-                self.sendTLS({"startTLS": "send"})
-                self._client.ui.showMessage(getMessage("startTLS-initiated"))
-            else:
-                self._client.ui.showErrorMessage(getMessage("startTLS-not-supported-server"))
-                self.sendHello()
-        else:
-            self._client.ui.showMessage(getMessage("startTLS-not-supported-client"))
-            self.sendHello()
+        if not self._client.initProtocol(self):
+            self.abort()
+            return
+        self.sendTLS({"startTLS": "send"})
 
     def connectionLost(self, reason):
-        try:
-            if "Invalid DNS-ID" in str(reason.value):
-                self._client._serverSupportsTLS = False
-            elif "tlsv1 alert protocol version" in str(reason.value):
-                self._client._clientSupportsTLS = False
-            elif "certificate verify failed" in str(reason.value):
-                self.dropWithError(getMessage("startTLS-server-certificate-invalid"))
-            elif "mismatched_id=DNS_ID" in str(reason.value):
-                self.dropWithError(getMessage("startTLS-server-certificate-invalid-DNS-ID"))
-            elif reason:
-                try:
-                    self._client.ui.showErrorMessage(str(type(reason)))
-                    self._client.ui.showErrorMessage(str(reason))
-                    if reason.stack:
-                        self._client.ui.showErrorMessage(str(reason.stack))
-                    self._client.ui.showErrorMessage(str(reason.value))
-                except:
-                    pass
-        except:
-            pass
-        self._client.destroyProtocol()
+        if not self._isCurrent():
+            return
+        detail = str(reason.value).lower()
+        if self._startedTLS and not self._tlsVerified:
+            if any(text in detail for text in ("certificate", "dns-id", "ip-address",
+                                                "mismatched_id", "hostname")):
+                self._client.connection.lost(self, "certificate", fatal=True)
+                return
+            if "protocol version" in detail or "unsupported protocol" in detail:
+                self._client.connection.lost(self, "tls-version", fatal=True)
+                return
+        self._client.connection.lost(self, "closed")
 
     def dropWithError(self, error):
-        self._client.ui.showErrorMessage(error)
-        self._client.protocolFactory.stopRetrying()
-        self.drop()
-
-    def _extractHelloArguments(self, hello):
-        username = hello["username"] if "username" in hello else None
-        roomName = hello["room"]["name"] if "room" in hello else None
-        version = hello["version"] if "version" in hello else None
-        version = hello["realversion"] if "realversion" in hello else version  # Used for 1.2.X compatibility
-        motd = hello["motd"] if "motd" in hello else None
-        features = hello["features"] if "features" in hello else None
-        return username, roomName, version, motd, features
+        reason = error if error in ("hello", "certificate", "password", "protocol") else "protocol"
+        self._client.connection.reject(self, reason)
 
     def handleHello(self, hello):
-        username, roomName, version, motd, featureList = self._extractHelloArguments(hello)
-        if not username or not roomName or not version:
-            self.dropWithError(getMessage("hello-server-error").format(hello))
-        else:
-            self._client.setUsername(username)
-            self._client.setRoom(roomName)
+        try:
+            username = hello["username"]
+            roomName = hello["room"]["name"]
+            version = hello.get("realversion", hello.get("version"))
+            motd = hello.get("motd") or ""
+            featureList = hello.get("features")
+            valid = (self._sentHello and not self.logged
+                     and isinstance(username, str) and bool(username.strip())
+                     and isinstance(roomName, str) and bool(roomName.strip())
+                     and isinstance(version, str) and re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", version)
+                     and isinstance(motd, str)
+                     and (featureList is None or isinstance(featureList, dict)))
+        except (AttributeError, KeyError, TypeError):
+            valid = False
+        if not valid or not self._client.connection.admitted(self):
+            self.dropWithError("hello")
+            return
+
+        self._client.setUsername(username)
+        self._client.setRoom(roomName)
+        self._client.ui.updateRoomName(roomName)
+        self._client.connection.refreshStatus()
         self.logged = True
-        if self.persistentRoomWarning(featureList):
+        self._client.setServerVersion(version, featureList)
+        if featureList and featureList.get("persistentRooms"):
             span = "\n\n" if motd else ""
             motd = getMessage("persistent-rooms-notice") + span + motd
         if motd:
             self._client.ui.showMessage(motd, noPlayer=True, noTimestamp=True, isMotd=True)
-        self._client.ui.showMessage(getMessage("connected-successful-notification"))
         self._client.connected()
-        self._client.sendFile()
-        self._client.setServerVersion(version, featureList)
-
-    def persistentRoomWarning(self, serverFeatures):
-        return serverFeatures["persistentRooms"] if "persistentRooms" in serverFeatures else False
+        early, self._earlyMessages = self._earlyMessages, []
+        for command, value in early:
+            if not self._isCurrent():
+                break
+            if command == "Set" and isinstance(value, dict) and "ready" in value:
+                ready = value["ready"]
+                if isinstance(ready, dict) and ready.get("username") == username:
+                    continue
+            self.handleMessages({command: value})
 
     def sendHello(self):
+        if not self._isCurrent() or self._sentHello:
+            return
+        self._sentHello = True
+        self._client.connection.awaitingHello(self)
         hello = {}
-        hello["username"] = self._client.getUsername()
+        hello["username"] = self._client.requestedUsername
         password = self._client.getPassword()
         if password:
             hello["password"] = password
@@ -184,14 +230,25 @@ class SyncClientProtocol(JSONCommandProtocol):
                     self._client.userlist.addUser(username, room, file_)
                 elif "left" in settings["event"]:
                     self._client.removeUser(username)
+            elif username == self._client.getUsername() and room and self._awaitingRoom:
+                self._acceptRoom(room)
             else:
                 self._client.userlist.modUser(username, room, file_)
+
+    def _acceptRoom(self, room):
+        if room != utils.truncateText(self._client.getRoom(), self._client.serverFeatures["maxRoomNameLength"]):
+            return
+        self._awaitingRoom = False
+        self._client.setRoom(room)
+        self._client.ui.updateRoomName(room)
+        self._client.connection.refreshStatus()
 
     def handleSet(self, settings):
         for (command, values) in settings.items():
             if command == "room":
                 roomName = values["name"] if "name" in values else None
-                self._client.setRoom(roomName)
+                if roomName and self._awaitingRoom:
+                    self._acceptRoom(roomName)
             elif command == "user":
                 self._SetUser(values)
             elif command == "controllerAuth":
@@ -208,15 +265,13 @@ class SyncClientProtocol(JSONCommandProtocol):
                 manuallyInitiated = values["manuallyInitiated"] if "manuallyInitiated" in values else True
                 setBy = values["setBy"] if "setBy" in values else None
                 self._client.setReady(user, isReady, manuallyInitiated, setBy)
-            elif command == "playlistIndex":
-                user = values['user']
-                resetPosition = True
-                if not self.hadFirstPlaylistIndex:
-                    self.hadFirstPlaylistIndex = True
-                    resetPosition = False
-                self._client.playlist.changeToPlaylistIndex(values['index'], user, resetPosition=resetPosition)
-            elif command == "playlistChange":
-                self._client.playlist.changePlaylist(values['files'], values['user'])
+            elif command == "playlistIndex" and not self._awaitingRoom:
+                resetPosition = self.hadFirstPlaylistIndex
+                self.hadFirstPlaylistIndex = True
+                self._client.playlist.changeToPlaylistIndex(
+                    values["index"], values["user"], resetPosition=resetPosition, remote=True)
+            elif command == "playlistChange" and not self._awaitingRoom:
+                self._client.playlist.changePlaylist(values["files"], values["user"], remote=True)
             elif command == "features":
                 self._client.setUserFeatures(values["username"], values['features'])
 
@@ -228,7 +283,7 @@ class SyncClientProtocol(JSONCommandProtocol):
 
     def sendRoomSetting(self, roomName, password=None):
         setting = {}
-        self.hadFirstStateUpdate = False
+        self._awaitingRoom = True
         self.hadFirstPlaylistIndex = False
         setting["name"] = roomName
         if password:
@@ -259,7 +314,7 @@ class SyncClientProtocol(JSONCommandProtocol):
         self.sendMessage({"List": None})
 
     def _extractStatePlaystateArguments(self, state):
-        position = state["playstate"]["position"] if "position" in state["playstate"] else 0
+        position = state["playstate"].get("position")
         paused = state["playstate"]["paused"] if "paused" in state["playstate"] else None
         doSeek = state["playstate"]["doSeek"] if "doSeek" in state["playstate"] else None
         setBy = state["playstate"]["setBy"] if "setBy" in state["playstate"] else None
@@ -278,27 +333,37 @@ class SyncClientProtocol(JSONCommandProtocol):
 
     def handleState(self, state):
         position, paused, doSeek, setBy = None, None, None, None
-        messageAge = 0
-        if not self.hadFirstStateUpdate:
-            self.hadFirstStateUpdate = True
-        if "ignoringOnTheFly" in state:
-            ignore = state["ignoringOnTheFly"]
+        messageAge, latencyCalculation = 0, None
+        try:
+            ignore = state.get("ignoringOnTheFly", {})
             if "server" in ignore:
                 self.serverIgnoringOnTheFly = ignore["server"]
                 self.clientIgnoringOnTheFly = 0
-            elif "client" in ignore:
-                if(ignore['client']) == self.clientIgnoringOnTheFly:
-                    self.clientIgnoringOnTheFly = 0
-        if "playstate" in state:
-            position, paused, doSeek, setBy = self._extractStatePlaystateArguments(state)
-        if "ping" in state:
-            messageAge, latencyCalculation = self._handleStatePing(state)
-        if position is not None and paused is not None and not self.clientIgnoringOnTheFly:
+            elif ignore.get("client") == self.clientIgnoringOnTheFly:
+                self.clientIgnoringOnTheFly = 0
+            if "playstate" in state:
+                position, paused, doSeek, setBy = self._extractStatePlaystateArguments(state)
+            if "ping" in state:
+                messageAge, latencyCalculation = self._handleStatePing(state)
+            usable = (type(position) in (float, int) and math.isfinite(position)
+                      and isinstance(paused, bool))
+        except (AttributeError, KeyError, OverflowError, TypeError, ValueError):
+            self.dropWithError("protocol")
+            return
+        if not self._awaitingRoom and (usable or "ping" in state):
+            self._client.connection.stateReceived(self, usable)
+        if usable and not self._awaitingRoom and not self.clientIgnoringOnTheFly:
             self._client.updateGlobalState(position, paused, doSeek, setBy, messageAge)
-        position, paused, doSeek, stateChange = self._client.getLocalState()
-        self.sendState(position, paused, doSeek, latencyCalculation, stateChange)
+        if self.serverIgnoringOnTheFly:
+            # Acknowledge the server's forced update without echoing the old player state.
+            self.sendState(None, None, None, latencyCalculation)
+        else:
+            position, paused, doSeek, stateChange = self._client.getLocalState()
+            self.sendState(position, paused, doSeek, latencyCalculation, stateChange)
 
     def sendState(self, position, paused, doSeek, latencyCalculation, stateChange=False):
+        if not self._client.canSendPlayback():
+            position, paused, stateChange = None, None, False
         state = {}
         positionAndPausedIsSet = position is not None and paused is not None
         clientIgnoreIsNotSet = self.clientIgnoringOnTheFly == 0 or self.serverIgnoringOnTheFly != 0
@@ -355,6 +420,8 @@ class SyncClientProtocol(JSONCommandProtocol):
             })
 
     def setPlaylist(self, files):
+        if not self._client.canSendPlaylist():
+            return
         self.sendSet({
             "playlistChange": {
                 "files": files
@@ -362,6 +429,8 @@ class SyncClientProtocol(JSONCommandProtocol):
         })
 
     def setPlaylistIndex(self, index):
+        if not self._client.canSendPlaylist():
+            return
         self.sendSet({
             "playlistIndex": {
                 "index": index
@@ -369,10 +438,10 @@ class SyncClientProtocol(JSONCommandProtocol):
         })
 
     def handleError(self, error):
-        if "startTLS" in error["message"] and not self.logged:
-            self._client._serverSupportsTLS = False
-        else:
-            self.dropWithError(error["message"])
+        message = error.get("message", "") if isinstance(error, dict) else ""
+        passwordErrors = (getMessage("password-required-server-error", "en"),
+                          getMessage("wrong-password-server-error", "en"))
+        self.dropWithError("password" if message in passwordErrors else "protocol")
 
     def sendError(self, message):
         self.sendMessage({"Error": {"message": message}})
@@ -381,32 +450,35 @@ class SyncClientProtocol(JSONCommandProtocol):
         self.sendMessage({"TLS": message})
 
     def handleTLS(self, message):
-        answer = message["startTLS"] if "startTLS" in message else None
-        if "true" in answer and not self.logged and self._client.protocolFactory.options is not None:
-            self.transport.startTLS(self._client.protocolFactory.options)
-            # To be deleted when the support for Twisted between >=16.4.0 and < 17.1.0 is dropped
-            minTwistedVersion = Version('twisted', 17, 1, 0)
-            if twistedVersion < minTwistedVersion:
-                self._client.protocolFactory.options._ctx.set_info_callback(self.customHandshakeCallback)
-        elif "false" in answer:
-            self._client.ui.showErrorMessage(getMessage("startTLS-not-supported-server"))
+        answer = message.get("startTLS") if isinstance(message, dict) else None
+        if self._sentHello or self._startedTLS:
+            self.dropWithError("protocol")
+        elif answer == "true":
+            options = self._client.protocolFactory.options
+            # Older Twisted versions do not notify IHandshakeListener. Replacing
+            # their OpenSSL callback would interfere with peer identity verification.
+            if options is None or twistedVersion < Version("twisted", 17, 1, 0):
+                self._client.connection.reject(self, "tls-unavailable")
+                return
+            self._startedTLS = True
+            try:
+                self.transport.startTLS(options)
+            except Exception:
+                self.dropWithError("certificate")
+                return
+        elif answer == "false":
             self.sendHello()
-
-    def customHandshakeCallback(self, conn, where, ret):
-        # To be deleted when the support for Twisted between >=16.4.0 and < 17.1.0 is dropped
-        from OpenSSL.SSL import SSL_CB_HANDSHAKE_START, SSL_CB_HANDSHAKE_DONE
-        if where == SSL_CB_HANDSHAKE_START:
-            self._client.ui.showDebugMessage("TLS handshake started")
-        if where == SSL_CB_HANDSHAKE_DONE:
-            self._client.ui.showDebugMessage("TLS handshake done")
-            self.handshakeCompleted()
+        else:
+            self.dropWithError("protocol")
 
     def handshakeCompleted(self):
+        if not self._isCurrent() or not self._startedTLS or self._sentHello:
+            return
         self._serverCertificateTLS = self.transport.getPeerCertificate()
         if not self._serverCertificateTLS:
-            self._client.ui.showErrorMessage(getMessage("startTLS-server-certificate-invalid"))
-            self.sendHello()
+            self.dropWithError("certificate")
             return
+        self._tlsVerified = True
 
         self._subjectTLS = ""
         try:
@@ -447,7 +519,6 @@ class SyncClientProtocol(JSONCommandProtocol):
         elif self._connVersionNumberTLS == 772:
             self._connVersionNumberTLS = '1.3'
 
-        self._client.ui.showMessage(getMessage("startTLS-secure-connection-ok").format(self._connVersionStringTLS))
         self._client.ui.setSSLMode( True,
                                     {'subject': self._subjectTLS, 'issuer': self._issuerTLS, 'expires': self._expireDateTLS,
                                     'protocolString': self._connVersionStringTLS, 'protocolVersion': self._connVersionNumberTLS,

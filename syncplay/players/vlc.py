@@ -180,21 +180,17 @@ class VlcPlayer(BasePlayer):
         self._fileUpdateClearEvents()
         self._getFileInfo()
         self._fileUpdateWaitEvents()
-        args = (self._filename, self._duration, self._filepath)
-        self.reactor.callFromThread(self._client.updateFile, *args)
-        self.setPaused(self._client.getGlobalPaused())
-        self.setPosition(self._client.getGlobalPosition())
+        self.reactor.callFromThread(self._client.updateFile, self._filename, self._duration,
+                                    self._filepath, True, True)
 
-    def askForStatus(self):
+    def askForStatus(self, report):
         self._filechanged = False
         self._positionAsk.clear()
         self._pausedAsk.clear()
         self._listener.sendLine(".")
         if self._filename and not self._filechanged:
-            self._positionAsk.wait(constants.PLAYER_ASK_DELAY)
-            self._client.updatePlayerStatus(self._paused, self.getCalculatedPosition())
-        else:
-            self._client.updatePlayerStatus(self._client.getGlobalPaused(), self._client.getGlobalPosition())
+            if self._positionAsk.wait(constants.PLAYER_ASK_DELAY) and not self._filechanged:
+                report(self._paused, self.getCalculatedPosition())
 
     def getCalculatedPosition(self):
         if self._lastVLCPositionUpdate is None:

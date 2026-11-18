@@ -80,14 +80,13 @@ class MplayerPlayer(BasePlayer):
         self.reactor.callLater(0, self._client.initPlayer, self)
         self._onFileUpdate()
 
-    def askForStatus(self):
+    def askForStatus(self, report):
         self._positionAsk.clear()
         self._pausedAsk.clear()
         self._getPaused()
         self._getPosition()
-        self._positionAsk.wait()
-        self._pausedAsk.wait()
-        self._client.updatePlayerStatus(self._paused, self._position)
+        if self._positionAsk.wait(constants.PLAYER_ASK_DELAY) and self._pausedAsk.wait(constants.PLAYER_ASK_DELAY):
+            report(self._paused, self._position)
 
     def _setProperty(self, property_, value):
         self._listener.sendLine("set_property {} {}".format(property_, value))

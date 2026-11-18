@@ -153,7 +153,7 @@ class MpvPlayer(BasePlayer):
         self._setProperty('speed', "{:.2f}".format(value))
 
     def setPaused(self, value):
-        if self._paused == value:
+        if self._paused == value and self._fileIsLoaded():
             self._client.ui.showDebugMessage("Not sending setPaused to mpv as state is already {}".format(value))
             return
         pauseValue = "yes" if value else "no"
@@ -303,7 +303,7 @@ class MpvPlayer(BasePlayer):
                 self.reactor.callFromThread(self._client.ui.showErrorMessage, self.quitReason, True)
             self.drop()
 
-    def askForStatus(self):
+    def askForStatus(self, report):
         self._positionAsk.clear()
         self._pausedAsk.clear()
         if not self._listener.isReadyForSend:
@@ -311,10 +311,10 @@ class MpvPlayer(BasePlayer):
             return
 
         self._getPausedAndPosition()
-        self._positionAsk.wait(constants.MPV_LOCK_WAIT_TIME)
-        self._pausedAsk.wait(constants.MPV_LOCK_WAIT_TIME)
-        self._client.updatePlayerStatus(
-            self._paused if self.fileLoaded else self._client.getGlobalPaused(), self.getCalculatedPosition())
+        hasPosition = self._positionAsk.wait(constants.MPV_LOCK_WAIT_TIME)
+        hasPause = self._pausedAsk.wait(constants.MPV_LOCK_WAIT_TIME)
+        if hasPosition and hasPause and self._fileIsLoaded():
+            report(self._paused, self.getCalculatedPosition())
 
     def drop(self):
         try:
@@ -494,13 +494,8 @@ class MpvPlayer(BasePlayer):
         self._client.ui.showDebugMessage("File update")
         self.fileLoaded = True
         self.lastLoadedTime = time.time()
-        self.reactor.callFromThread(self._client.updateFile, self._filename, self._duration, self._filepath)
-        if not (self._recentlyReset()):
-            self._client.ui.showDebugMessage("onFileUpdate setting position to global position: {}".format(self._client.getGlobalPosition()))
-            self.reactor.callFromThread(self.setPosition, self._client.getGlobalPosition())
-        if self._paused != self._client.getGlobalPaused():
-            self._client.ui.showDebugMessage("onFileUpdate setting position to global paused: {}".format(self._client.getGlobalPaused()))
-            self.reactor.callFromThread(self._client.getGlobalPaused)
+        self.reactor.callFromThread(self._client.updateFile, self._filename, self._duration,
+                                    self._filepath, not self._recentlyReset())
 
     def _fileIsLoaded(self, ignoreDelay=False):
         if ignoreDelay:
