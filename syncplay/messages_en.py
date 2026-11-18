@@ -361,7 +361,7 @@ en = {
     "recovery-status-sync": "Admitted to room {room}. Synchronizing…",
     "recovery-status-room": "In room {room}",
     "recovery-status-waiting": "Lost room {room} at {endpoint} ({phase}, {reason}). Retrying in {delay:g} s.",
-    "recovery-status-attention": "Could not connect to room {room} at {endpoint} ({phase}, {reason}). Correct the settings if needed, then use Reconnect or type retry.",
+    "recovery-status-attention": "Could not connect to room {room} at {endpoint} ({phase}, {reason}). Use Reconnect or type retry to try the current settings again. To change the server address or password, reopen Syncplay's startup configuration.",
     "recovery-status-idle": "Disconnected from room {room}. Use Reconnect or type retry to connect.",
     "recovery-status-stopped": "Connection to room {room} closed.",
     "recovery-rejoined": "Rejoined room {}.",

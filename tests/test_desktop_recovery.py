@@ -1,6 +1,8 @@
 import io
 import json
 from contextlib import redirect_stdout
+from pathlib import Path
+from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import Mock
 
@@ -86,7 +88,8 @@ class RecoveryTests(unittest.TestCase):
         self.clock.advance(60)
         self.assertEqual(len(self.endpoint.attempts), 1)
         status, pending, log, attention = self.ui.connectionStatus.call_args.args
-        for text in ("127.0.0.1:12345", "Room {a}", "TCP", "refused", "Reconnect"):
+        for text in ("127.0.0.1:12345", "Room {a}", "TCP", "refused", "Reconnect",
+                     "server address or password", "startup configuration"):
             self.assertIn(text, log)
         self.assertNotIn("private reason", log)
         self.assertTrue(attention)
@@ -99,6 +102,35 @@ class RecoveryTests(unittest.TestCase):
         self.hello(transport, room="Room {a}")
         self.state(transport)
         self.assertEqual(self.connection.phase, "room")
+
+    def test_startup_playlist_is_sent_once_after_successful_admission(self):
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "requested.txt"
+            path.write_text("requested.mp4\n", encoding="utf-8")
+            self.makeClient(loadPlaylistFromFile=str(path))
+            self.endpoint.pending.errback(error.ConnectionRefusedError())
+            self.clock.advance(0)
+            self.client.manualReconnect()
+
+            initial = self.endpoint.reach()
+            self.hello(initial)
+            empty = {"Set": {"playlistChange": {"files": [], "user": None}}}
+            initial.receive(empty)
+            self.state(initial)
+            changes = [message["Set"]["playlistChange"] for message in initial.messages()
+                       if "playlistChange" in message.get("Set", {})]
+            self.assertEqual(changes, [{"files": ["requested.mp4"]}])
+
+            initial.lose()
+            self.clock.advance(1)
+            recovered = self.endpoint.reach()
+            self.hello(recovered)
+            recovered.receive(empty)
+            self.state(recovered)
+            self.assertEqual(self.connection.phase, "room")
+            self.assertFalse(any("playlistChange" in message.get("Set", {}) or
+                                 "playlistIndex" in message.get("Set", {})
+                                 for message in recovered.messages()))
 
     def test_dns_failure_and_combined_deadline(self):
         self.makeClient()
