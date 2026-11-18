@@ -21,22 +21,31 @@
 # SOFTWARE.
 -->
 
-# Syncplay
+# SyncPlayU
 ![GitHub Actions build status](https://github.com/Syncplay/syncplay/workflows/Build/badge.svg)
 
 Solution to synchronize video playback across multiple instances of mpv, VLC, MPC-HC, MPC-BE and mplayer2 over the Internet.
 
 This fork automatically rejoins a desktop room after an interrupted connection. An unsuccessful first connection leaves the window and player open. Use **File → Reconnect** or type `retry` in the console.
 
+## Install on macOS
+
+Download `SyncPlayU-macOS.dmg` from the [latest SyncPlayU release](https://github.com/NightMachinery/syncplay/releases/latest), or install it with Homebrew. If Homebrew installed Syncplay, remove that cask first to switch while keeping its settings.
+
+```sh
+if brew list --cask syncplay >/dev/null 2>&1; then
+  brew uninstall --cask syncplay
+fi
+brew install --cask NightMachinery/tap/syncplayu
+```
+
+For a bug report, include both the upstream and Night versions from About, the startup log or `--version`. Use `--version-json` to read them separately from a script. See the [desktop release details](docs/desktop-release.md).
+
 To run from this checkout, install the dependencies with `python -m pip install -r requirements.txt -r requirements_gui.txt`, then run `python syncplayClient.py` and choose your server, room and media player. See the [desktop recovery behavior and verification](docs/desktop-reconnection.md).
 
-Find installable builds in [Syncplay Night releases](https://github.com/NightMachinery/syncplay/releases). For a bug report, include both the upstream and Night versions from About, the startup log or `--version`. Use `--version-json` to read them separately from a script. See the [desktop release details](docs/desktop-release.md).
+## Upstream Syncplay
 
-## Official website
-https://syncplay.pl
-
-## Download
-https://syncplay.pl/download/
+[Project website](https://syncplay.pl/) and [downloads](https://syncplay.pl/download/).
 
 ## What does it do
 

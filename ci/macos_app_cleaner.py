@@ -5,7 +5,7 @@ import shutil
 from glob import glob
 
 pyver = platform.python_version_tuple()[0] + '.' + platform.python_version_tuple()[1]
-resources = 'dist/Syncplay Night.app/Contents/Resources'
+resources = 'dist/SyncPlayU.app/Contents/Resources'
 
 # Clean resources
 

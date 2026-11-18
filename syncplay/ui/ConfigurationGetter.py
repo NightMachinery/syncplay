@@ -8,8 +8,8 @@ import os
 import sys
 from configparser import ConfigParser, DEFAULTSECT
 
-from syncplay import constants, utils, milestone
-from syncplay.release import DISPLAY_VERSION, VERSION_INFO
+from syncplay import constants, utils
+from syncplay.release import APP_ICON, APP_NAME, DISPLAY_TITLE, VERSION_INFO
 from syncplay.messages import getMessage, setLanguage, isValidLanguage
 from syncplay.players.playerFactory import PlayerFactory
 from syncplay.utils import isMacOS, isWindows
@@ -551,7 +551,7 @@ class ConfigurationGetter(object):
             print(json.dumps(VERSION_INFO))
             sys.exit()
         if args.version:
-            print(getMessage("version-message").format(DISPLAY_VERSION, milestone))
+            print(DISPLAY_TITLE)
             sys.exit()
         self._overrideConfigWithArgs(args)
         if not self._config['noGui']:
@@ -563,6 +563,9 @@ class ConfigurationGetter(object):
                     raise ImportError("Failed to identify compatible version of PySide.")
                 if QCoreApplication.instance() is None:
                     self.app = QtWidgets.QApplication(sys.argv)
+                    self.app.setApplicationName(APP_NAME)
+                    self.app.setApplicationDisplayName(APP_NAME)
+                    self.app.setWindowIcon(QtGui.QIcon(utils.resourcespath + APP_ICON))
                     self.app.setDesktopFileName("syncplay")
                     if isWindows():
                         try:

@@ -3,7 +3,7 @@ import subprocess
 
 from py2app.util import codesign_adhoc, iter_platform_files
 
-APPDIR = 'dist/Syncplay Night.app'
+APPDIR = 'dist/SyncPlayU.app'
 SYSTEM_PATHS = ("/usr/lib", "/System/Library")
 RPATH = re.compile(r"^\s*cmd LC_RPATH\n\s*cmdsize \d+\n\s*path (.+) \(offset ", re.MULTILINE)
 

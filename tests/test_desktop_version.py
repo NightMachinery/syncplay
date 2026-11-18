@@ -5,7 +5,7 @@ from contextlib import redirect_stdout
 from unittest.mock import patch
 
 from syncplay import version
-from syncplay.release import DISPLAY_VERSION, NIGHT_VERSION, RELEASE_TAG
+from syncplay.release import NIGHT_VERSION, RELEASE_TAG
 from syncplay.ui.ConfigurationGetter import ConfigurationGetter
 
 
@@ -21,7 +21,8 @@ class DesktopVersionTests(unittest.TestCase):
         return output.getvalue()
 
     def test_cli_shows_both_versions(self):
-        self.assertIn(DISPLAY_VERSION, self.versionOutput("--version"))
+        self.assertEqual(self.versionOutput("--version").strip(),
+                         "SyncPlayU {} (Night {})".format(version, NIGHT_VERSION))
 
     def test_json_keeps_versions_separate_from_the_release_tag(self):
         self.assertRegex(version, r"^\d+\.\d+\.\d+$")

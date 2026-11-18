@@ -195,8 +195,6 @@ jobs:
       - name: Prepare for deployment
         run: |
           ls -al
-          export VER="$(cat syncplay/__init__.py | awk '/version/ {gsub("\047", "", $3); print $NF}')"
-          echo "VER=$VER" >> $GITHUB_ENV
           mkdir dist_actions
           ci/macos-deploy.sh
           ls -al dist_actions
@@ -204,9 +202,9 @@ jobs:
       - name: Deploy
         uses: actions/upload-artifact@v6
         with:
-          name: Syncplay_${{ env.VER }}.dmg
+          name: SyncPlayU-macOS.dmg
           path: |
-            dist_actions/Syncplay_${{ env.VER }}.dmg
+            dist_actions/SyncPlayU-macOS.dmg
 
   deb:
     name: Build Debian package

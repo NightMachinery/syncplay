@@ -6,6 +6,7 @@ from datetime import datetime
 
 from syncplay import constants
 from syncplay import utils
+from syncplay.release import APP_ICON, APP_NAME
 from syncplay.messages import getMessage, getLanguages, setLanguage, getInitialLanguage
 from syncplay.watched import getDefaultWatchedHistoryExportFilename, WatchedHistoryError, WatchedHistoryImportExportHelper, WatchedHistoryInvalidImportError
 from syncplay.players.playerFactory import PlayerFactory
@@ -286,7 +287,7 @@ class ConfigDialog(QtWidgets.QDialog):
 
     def languageChanged(self):
         setLanguage(str(self.languageCombobox.itemData(self.languageCombobox.currentIndex())))
-        QtWidgets.QMessageBox.information(self, "Syncplay", getMessage("language-changed-msgbox-label"))
+        QtWidgets.QMessageBox.information(self, APP_NAME, getMessage("language-changed-msgbox-label"))
 
     def browsePlayerpath(self):
         options = QtWidgets.QFileDialog.Options()
@@ -439,7 +440,7 @@ class ConfigDialog(QtWidgets.QDialog):
         self.config['roomList'] = roomList
 
     def showErrorMessage(self, errorMessage):
-        QtWidgets.QMessageBox.warning(self, "Syncplay", errorMessage)
+        QtWidgets.QMessageBox.warning(self, APP_NAME, errorMessage)
 
     def _getWatchedHistoryDefaultDirectory(self):
         return QStandardPaths.standardLocations(QStandardPaths.DocumentsLocation)[0]
@@ -484,7 +485,7 @@ class ConfigDialog(QtWidgets.QDialog):
                 message += "\n\n" + getMessage("watched-history-export-added").format(result.get("added"))
             if result.get("backupPath"):
                 message += "\n\n" + getMessage("watched-history-backup-created").format(result.get("backupPath"))
-            QtWidgets.QMessageBox.information(self, "Syncplay", message)
+            QtWidgets.QMessageBox.information(self, APP_NAME, message)
         except WatchedHistoryInvalidImportError:
             self.showErrorMessage(getMessage("watched-history-invalid-error"))
         except WatchedHistoryError as e:
@@ -515,7 +516,7 @@ class ConfigDialog(QtWidgets.QDialog):
                     message += "\n" + getMessage("watched-history-backup-created").format(result.get("backupPath"))
             else:
                 message = getMessage("watched-history-no-import-changes")
-            QtWidgets.QMessageBox.information(self, "Syncplay", message)
+            QtWidgets.QMessageBox.information(self, APP_NAME, message)
         except WatchedHistoryInvalidImportError:
             self.showErrorMessage(getMessage("watched-history-invalid-error"))
         except WatchedHistoryError as e:
@@ -1593,9 +1594,9 @@ class ConfigDialog(QtWidgets.QDialog):
 
         super(ConfigDialog, self).__init__()
 
-        self.setWindowTitle(getMessage("config-window-title"))
+        self.setWindowTitle(getMessage("config-window-title").replace("Syncplay", APP_NAME))
         self.setWindowFlags(self.windowFlags() & Qt.WindowCloseButtonHint & ~Qt.WindowContextHelpButtonHint)
-        self.setWindowIcon(QtGui.QIcon(resourcespath + "syncplay.png"))
+        self.setWindowIcon(QtGui.QIcon(resourcespath + APP_ICON))
 
         self.stackedLayout = QtWidgets.QStackedLayout()
         self.stackedFrame = QtWidgets.QFrame()

@@ -7,7 +7,7 @@ Build with python buildPy2app.py py2app.
 from setuptools import setup
 from glob import glob
 import syncplay
-from syncplay.release import NIGHT_VERSION, RELEASE_TAG
+from syncplay.release import APP_NAME, NIGHT_VERSION, RELEASE_TAG
 
 APP = ['syncplayClient.py']
 DATA_FILES = [
@@ -16,7 +16,7 @@ DATA_FILES = [
     ('resources/lua/intf', glob('syncplay/resources/lua/intf/*.lua'))
 ]
 OPTIONS = {
-    'iconfile': 'syncplay/resources/icon.icns',
+    'iconfile': 'syncplay/resources/syncplayu.icns',
     'extra_scripts': 'syncplayServer.py',
     'includes': {'PySide6.QtCore', 'PySide6.QtGui', 'PySide6.QtWidgets', 'certifi', 'cffi', 'pem'},
     'excludes': {'PySide', 'PySide2', 'tkinter'},
@@ -27,11 +27,11 @@ OPTIONS = {
         'styles/libqmacstyle.dylib'
     ],
     'plist': {
-        'CFBundleName': 'Syncplay Night',
-        'CFBundleDisplayName': 'Syncplay Night',
+        'CFBundleName': APP_NAME,
+        'CFBundleDisplayName': APP_NAME,
         'CFBundleShortVersionString': syncplay.version,
         'CFBundleVersion': str(NIGHT_VERSION),
-        'CFBundleIdentifier': 'io.github.NightMachinery.SyncplayNight',
+        'CFBundleIdentifier': 'io.github.NightMachinery.SyncPlayU',
         'LSMinimumSystemVersion': '14.0',
         'SyncplayUpstreamVersion': syncplay.version,
         'SyncplayNightVersion': NIGHT_VERSION,
@@ -42,7 +42,7 @@ OPTIONS = {
 
 setup(
     app=APP,
-    name='Syncplay',
+    name=APP_NAME,
     data_files=DATA_FILES,
     options={'py2app': OPTIONS},
     setup_requires=['py2app'],

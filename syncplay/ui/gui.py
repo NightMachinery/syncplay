@@ -14,7 +14,7 @@ from twisted.internet import task
 
 from syncplay import utils, constants, release_number
 from syncplay.messages import getMessage
-from syncplay.release import DISPLAY_VERSION
+from syncplay.release import APP_ICON, APP_NAME, DISPLAY_TITLE, DISPLAY_VERSION
 from syncplay.ui.consoleUI import ConsoleUI
 from syncplay.utils import resourcespath
 from syncplay.utils import isLinux, isWindows, isMacOS
@@ -144,14 +144,14 @@ class AboutDialog(QtWidgets.QDialog):
             self.setWindowTitle("")
             self.setWindowFlags(Qt.Dialog | Qt.WindowTitleHint | Qt.WindowCloseButtonHint | Qt.CustomizeWindowHint)
         else:
-            self.setWindowTitle(getMessage("about-dialog-title"))
+            self.setWindowTitle(getMessage("about-dialog-title").replace("Syncplay", APP_NAME))
             if isWindows():
                 if IsPySide6:
                     self.setWindowFlags(Qt.Dialog | Qt.WindowTitleHint | Qt.WindowSystemMenuHint | Qt.WindowCloseButtonHint  | Qt.CustomizeWindowHint                        )
                 else:
                     self.setWindowFlags(self.windowFlags() & ~Qt.WindowContextHelpButtonHint)
-        self.setWindowIcon(QtGui.QPixmap(resourcespath + 'syncplay.png'))
-        nameLabel = QtWidgets.QLabel("<center><strong>Syncplay Night</strong></center>")
+        self.setWindowIcon(QtGui.QIcon(resourcespath + APP_ICON))
+        nameLabel = QtWidgets.QLabel("<center><strong>{}</strong></center>".format(APP_NAME))
         nameLabel.setFont(QtGui.QFont("Helvetica", 18))
         linkLabel = QtWidgets.QLabel()
         if isDarkMode:
@@ -167,7 +167,7 @@ class AboutDialog(QtWidgets.QDialog):
             "<center><p>Copyright &copy; 2012&ndash;2026 Syncplay</p><p>" +
             getMessage("about-dialog-license-text") + "</p></center>")
         aboutIcon = QtGui.QIcon()
-        aboutIcon.addFile(resourcespath + "syncplayAbout.png")
+        aboutIcon.addFile(resourcespath + APP_ICON)
         aboutIconLabel = QtWidgets.QLabel()
         aboutIconLabel.setPixmap(aboutIcon.pixmap(64, 64))
         aboutLayout = QtWidgets.QGridLayout()
@@ -215,7 +215,7 @@ class CertificateDialog(QtWidgets.QDialog):
                     self.setWindowFlags(Qt.Dialog | Qt.WindowTitleHint | Qt.WindowSystemMenuHint | Qt.WindowCloseButtonHint  | Qt.CustomizeWindowHint                        )
                 else:
                     self.setWindowFlags(self.windowFlags() & ~Qt.WindowContextHelpButtonHint)
-        self.setWindowIcon(QtGui.QPixmap(resourcespath + 'syncplay.png'))
+        self.setWindowIcon(QtGui.QIcon(resourcespath + APP_ICON))
         statusLabel = QtWidgets.QLabel(getMessage("tls-dialog-status-label").format(tlsData["subject"]))
         descLabel = QtWidgets.QLabel(getMessage("tls-dialog-desc-label").format(tlsData["subject"]))
         connDataLabel = QtWidgets.QLabel(getMessage("tls-dialog-connection-label").format(tlsData["protocolVersion"], tlsData["cipher"]))
@@ -1120,7 +1120,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def showErrorMessage(self, message, criticalerror=False):
         message = str(message)
         if criticalerror:
-            QtWidgets.QMessageBox.critical(self, "Syncplay", message)
+            QtWidgets.QMessageBox.critical(self, APP_NAME, message)
         message = message.replace("&", "&amp;").replace('"', "&quot;").replace("<", "&lt;").replace(">", "&gt;")
         message = message.replace("&lt;a href=&quot;https://syncplay.pl/trouble&quot;&gt;", '<a href="https://syncplay.pl/trouble">').replace("&lt;/a&gt;", "</a>")
         message = message.replace("&lt;a href=&quot;https://mpv.io/&quot;&gt;", '<a href="https://mpv.io/">').replace("&lt;/a&gt;", "</a>")
@@ -2026,8 +2026,8 @@ class MainWindow(QtWidgets.QMainWindow):
         if not isMacOS():
             window.helpMenu.addSeparator()
             window.about = window.helpMenu.addAction(
-                QtGui.QPixmap(resourcespath + 'syncplay.png'),
-                getMessage("about-menu-label"))
+                QtGui.QIcon(resourcespath + APP_ICON),
+                getMessage("about-menu-label").replace("Syncplay", APP_NAME))
         else:
             window.about = window.helpMenu.addAction("&About")
             window.about.setMenuRole(QtWidgets.QAction.AboutRole)
@@ -2167,7 +2167,7 @@ class MainWindow(QtWidgets.QMainWindow):
             if reply == QtWidgets.QMessageBox.Yes:
                 self.QtGui.QDesktopServices.openUrl(QUrl(updateURL))
         elif userInitiated:
-            QtWidgets.QMessageBox.information(self, "Syncplay", updateMessage)
+            QtWidgets.QMessageBox.information(self, APP_NAME, updateMessage)
         else:
             self.showMessage(updateMessage)
 
@@ -2346,7 +2346,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.setWindowFlags(self.windowFlags() & Qt.AA_DontUseNativeMenuBar)
             except TypeError:
                 self.setWindowFlags(self.windowFlags())
-        self.setWindowTitle("Syncplay " + DISPLAY_VERSION)
+        self.setWindowTitle(DISPLAY_TITLE)
         self.mainLayout = QtWidgets.QVBoxLayout()
         self.addTopLayout(self)
         self.addBottomLayout(self)
@@ -2359,7 +2359,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.connectionStatusLabel.setSizePolicy(QtWidgets.QSizePolicy.Ignored, QtWidgets.QSizePolicy.Preferred)
         self.statusBar().addPermanentWidget(self.connectionStatusLabel, 1)
         self.loadSettings()
-        self.setWindowIcon(QtGui.QPixmap(resourcespath + "syncplay.png"))
+        self.setWindowIcon(QtGui.QIcon(resourcespath + APP_ICON))
         if isWindows() and IsPySide6:
             self.setWindowFlags(Qt.Window | Qt.WindowTitleHint | Qt.WindowSystemMenuHint | Qt.WindowMinimizeButtonHint | Qt.WindowMaximizeButtonHint | Qt.WindowCloseButtonHint | Qt.CustomizeWindowHint)
         else:
