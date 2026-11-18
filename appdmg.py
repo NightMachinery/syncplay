@@ -3,7 +3,7 @@ import os.path
 
 import plistlib
 
-application = defines.get('app', 'dist/Syncplay.app')
+application = defines.get('app', 'dist/Syncplay Night.app')
 appname = os.path.basename(application)
 
 def read_plist(path):

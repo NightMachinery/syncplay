@@ -4,11 +4,12 @@ import shutil
 
 from glob import glob
 
-pyver = platform.python_version_tuple()[0] + '.' +  platform.python_version_tuple()[1]
+pyver = platform.python_version_tuple()[0] + '.' + platform.python_version_tuple()[1]
+resources = 'dist/Syncplay Night.app/Contents/Resources'
 
 # Clean resources
 
-PATH = 'dist/Syncplay.app/Contents/Resources/'
+PATH = resources
 
 to_be_kept = []
 to_be_deleted = []
@@ -26,7 +27,7 @@ for p in to_be_deleted:
 
 # Clean PySide6 folder
 
-PATH = f'dist/Syncplay.app/Contents/Resources/lib/python{pyver}/PySide6'
+PATH = f'{resources}/lib/python{pyver}/PySide6'
 
 shutil.rmtree(f'{PATH}/examples', ignore_errors=True)
 shutil.rmtree(f'{PATH}/include', ignore_errors=True)
@@ -53,7 +54,7 @@ for p in to_be_deleted:
 
 # Clean PySide6/Qt folder
 
-PATH = f'dist/Syncplay.app/Contents/Resources/lib/python{pyver}/PySide6/Qt'
+PATH = f'{resources}/lib/python{pyver}/PySide6/Qt'
 
 to_be_deleted.extend([f'{PATH}/qml', f'{PATH}/translations'])
 
@@ -66,7 +67,7 @@ for p in to_be_deleted:
 
 # Clean PySide6/Qt/lib folder
 
-PATH = f'dist/Syncplay.app/Contents/Resources/lib/python{pyver}/PySide6/Qt/lib'
+PATH = f'{resources}/lib/python{pyver}/PySide6/Qt/lib'
 
 to_be_kept = ['QtCore', 'QtDBus', 'QtGui', 'QtWidgets']
 to_be_deleted = [f'{PATH}/metatypes']
@@ -84,7 +85,7 @@ for p in to_be_deleted:
 
 # Clean PySide6/Qt/plugins folder
 
-PATH = f'dist/Syncplay.app/Contents/Resources/lib/python{pyver}/PySide6/Qt/plugins'
+PATH = f'{resources}/lib/python{pyver}/PySide6/Qt/plugins'
 
 to_be_kept = ['platforms', 'styles']
 to_be_deleted = []
@@ -104,11 +105,12 @@ for p in to_be_deleted:
 
 cwd = os.getcwd()
 
-FROM = f'dist/Syncplay.app/Contents/Resources/lib/python{pyver}/shiboken6'
-TO = f'dist/Syncplay.app/Contents/Resources/lib/python{pyver}/PySide6'
+FROM = f'{resources}/lib/python{pyver}/shiboken6'
+TO = f'{resources}/lib/python{pyver}/PySide6'
 
 fn = os.path.basename(glob(f'{FROM}/libshiboken6*.dylib')[0])
 
 os.chdir(TO)
-os.symlink(f'../shiboken6/{fn}', f'./{fn}')
+if not os.path.lexists(fn):
+    os.symlink(f'../shiboken6/{fn}', fn)
 os.chdir(cwd)

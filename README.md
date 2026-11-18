@@ -30,6 +30,8 @@ This fork automatically rejoins a desktop room after an interrupted connection. 
 
 To run from this checkout, install the dependencies with `python -m pip install -r requirements.txt -r requirements_gui.txt`, then run `python syncplayClient.py` and choose your server, room and media player. See the [desktop recovery behavior and verification](docs/desktop-reconnection.md).
 
+Find installable builds in [Syncplay Night releases](https://github.com/NightMachinery/syncplay/releases). For a bug report, include both the upstream and Night versions from About, the startup log or `--version`. Use `--version-json` to read them separately from a script. See the [desktop release details](docs/desktop-release.md).
+
 ## Official website
 https://syncplay.pl
 
