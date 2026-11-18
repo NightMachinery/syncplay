@@ -2,12 +2,14 @@
 import argparse
 import ast
 import codecs
+import json
 import re
 import os
 import sys
 from configparser import ConfigParser, DEFAULTSECT
 
-from syncplay import constants, utils, version, milestone
+from syncplay import constants, utils, milestone
+from syncplay.release import DISPLAY_VERSION, VERSION_INFO
 from syncplay.messages import getMessage, setLanguage, isValidLanguage
 from syncplay.players.playerFactory import PlayerFactory
 from syncplay.utils import isMacOS, isWindows
@@ -540,12 +542,16 @@ class ConfigurationGetter(object):
         self._argparser.add_argument('file', metavar='file', type=str, nargs='?', help=getMessage("file-argument"))
         self._argparser.add_argument('--clear-gui-data', action='store_true', help=getMessage("clear-gui-data-argument"))
         self._argparser.add_argument('-v', '--version', action='store_true', help=getMessage("version-argument"))
+        self._argparser.add_argument('--version-json', action='store_true', help=getMessage("version-json-argument"))
         self._argparser.add_argument('--load-playlist-from-file', metavar="loadPlaylistFromFile", type=str, help=getMessage("load-playlist-from-file-argument"))
 
         self._argparser.add_argument('_args', metavar='options', type=str, nargs='*', help=getMessage("args-argument"))
         args = self._argparser.parse_args()
+        if args.version_json:
+            print(json.dumps(VERSION_INFO))
+            sys.exit()
         if args.version:
-            print(getMessage("version-message").format(version, milestone))
+            print(getMessage("version-message").format(DISPLAY_VERSION, milestone))
             sys.exit()
         self._overrideConfigWithArgs(args)
         if not self._config['noGui']:

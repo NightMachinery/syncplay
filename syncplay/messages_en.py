@@ -207,6 +207,7 @@ en = {
 
     "version-argument": 'prints your version',
     "version-message": "You're using Syncplay version {} ({})",
+    "version-json-argument": "print the upstream and Night versions as JSON and exit",
 
     "load-playlist-from-file-argument": "loads playlist from text file (one entry per line)",
 

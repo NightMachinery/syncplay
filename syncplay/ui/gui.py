@@ -12,8 +12,9 @@ from platform import python_version
 
 from twisted.internet import task
 
-from syncplay import utils, constants, version, revision, release_number
+from syncplay import utils, constants, release_number
 from syncplay.messages import getMessage
+from syncplay.release import DISPLAY_VERSION
 from syncplay.ui.consoleUI import ConsoleUI
 from syncplay.utils import resourcespath
 from syncplay.utils import isLinux, isWindows, isMacOS
@@ -150,7 +151,7 @@ class AboutDialog(QtWidgets.QDialog):
                 else:
                     self.setWindowFlags(self.windowFlags() & ~Qt.WindowContextHelpButtonHint)
         self.setWindowIcon(QtGui.QPixmap(resourcespath + 'syncplay.png'))
-        nameLabel = QtWidgets.QLabel("<center><strong>Syncplay</strong></center>")
+        nameLabel = QtWidgets.QLabel("<center><strong>Syncplay Night</strong></center>")
         nameLabel.setFont(QtGui.QFont("Helvetica", 18))
         linkLabel = QtWidgets.QLabel()
         if isDarkMode:
@@ -158,9 +159,8 @@ class AboutDialog(QtWidgets.QDialog):
         else:
             linkLabel.setText("<center><a href=\"https://syncplay.pl\">syncplay.pl</a></center>")
         linkLabel.setOpenExternalLinks(True)
-        versionExtString = version + revision
         versionLabel = QtWidgets.QLabel(
-            "<p><center>" + getMessage("about-dialog-release").format(versionExtString, release_number) +
+            "<p><center>" + getMessage("about-dialog-release").format(DISPLAY_VERSION, release_number) +
             "<br />Python " + python_version() + " - " + __binding__ + " " + __binding_version__ +
             " - Qt " + __qt_version__ + "</center></p>")
         licenseLabel = QtWidgets.QLabel(
@@ -2346,7 +2346,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.setWindowFlags(self.windowFlags() & Qt.AA_DontUseNativeMenuBar)
             except TypeError:
                 self.setWindowFlags(self.windowFlags())
-        self.setWindowTitle("Syncplay v" + version + revision)
+        self.setWindowTitle("Syncplay " + DISPLAY_VERSION)
         self.mainLayout = QtWidgets.QVBoxLayout()
         self.addTopLayout(self)
         self.addBottomLayout(self)
