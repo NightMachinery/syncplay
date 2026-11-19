@@ -10,6 +10,7 @@ import ast
 
 from syncplay import constants
 from syncplay.messages import getMessage
+from syncplay.playback import validPlayerSpeed
 from syncplay.players.basePlayer import BasePlayer
 from syncplay.utils import getRuntimeDir, isURL, findResourcePath
 from syncplay.utils import isMacOS, isWindows, isASCII
@@ -28,7 +29,12 @@ class MpvPlayer(BasePlayer):
     alertOSDSupported = True
     chatOSDSupported = True
     speedSupported = True
+    sharedSpeedReady = False
     customOpenDialog = False
+
+    @classmethod
+    def canObserveNativeSpeed(cls):
+        return cls is MpvPlayer
 
     @staticmethod
     def run(client, playerPath, filePath, args):
@@ -150,13 +156,35 @@ class MpvPlayer(BasePlayer):
         self._listener.sendLine(["script-message-to", "syncplayintf", "chat", messageString])
 
     def setSpeed(self, value):
-        self._setProperty('speed', "{:.2f}".format(value))
+        if not self.sharedSpeedReady:
+            self._setProperty('speed', "{:.2f}".format(value))
+            return
+        self._speedCommand += 1
+        self._listener.sendLine(["script-message-to", "syncplayintf", "set_syncplay_speed",
+                                 str(self._speedCommand), str(value)])
+
+    def _reportSpeed(self, source, serial, speed):
+        if serial != self._speedCommand or not validPlayerSpeed(speed):
+            return
+        self._reanchorPosition()
+        self._playbackSpeed = speed
+        if source == "initial":
+            self.sharedSpeedReady = True
+        self._client.playerSpeedObserved(self, speed, source == "native")
+
+    def _reanchorPosition(self):
+        if self._positionAnchoredAt is not None:
+            now = time.monotonic()
+            if self._paused is False:
+                self._position += (now - self._positionAnchoredAt) * self._playbackSpeed
+            self._positionAnchoredAt = now
 
     def setPaused(self, value):
         if self._paused == value and self._fileIsLoaded():
             self._client.ui.showDebugMessage("Not sending setPaused to mpv as state is already {}".format(value))
             return
         pauseValue = "yes" if value else "no"
+        self._reanchorPosition()
         self._setProperty("pause", pauseValue)
         self._paused = value
         if value == False:
@@ -210,10 +238,12 @@ class MpvPlayer(BasePlayer):
                 self._client.ui.showErrorMessage, getMessage("mpv-unresponsive-error").format(int(diff)), True)
             self.drop()
         if diff > constants.PLAYER_ASK_DELAY and not self._paused:
+            elapsed = time.monotonic() - self._positionAnchoredAt
+            advance = elapsed * self._playbackSpeed
             self._client.ui.showDebugMessage(
                 "mpv did not response in time, so assuming position is {} ({}+{})".format(
-                    self._position + diff, self._position, diff))
-            return self._position + diff
+                    self._position + advance, self._position, advance))
+            return self._position + advance
         else:
             return self._position
 
@@ -225,6 +255,7 @@ class MpvPlayer(BasePlayer):
             self._client.ui.showDebugMessage("NONE TYPE POSITION!")
             return
         self.lastMPVPositionUpdate = time.time()
+        self._positionAnchoredAt = time.monotonic()
         if self._recentlyReset():
             self._client.ui.showDebugMessage("Recently reset, so storing position as 0")
             self._position = 0
@@ -392,6 +423,7 @@ class MpvPlayer(BasePlayer):
         self._setProperty(self.POSITION_QUERY, "{}".format(value))
         time.sleep(0.03)
         self.lastMPVPositionUpdate = time.time()
+        self._positionAnchoredAt = time.monotonic()
 
     def openFile(self, filePath, resetPosition=False):
         self._client.ui.showDebugMessage("openFile, resetPosition=={}".format(resetPosition))
@@ -429,6 +461,10 @@ class MpvPlayer(BasePlayer):
             self._setProperty("input-ipc-server", socketPath)
 
     def _handleUnknownLine(self, line):
+        if line.startswith("<syncplay-speed ") and self.canObserveNativeSpeed():
+            _, source, serial, speed = line.strip("<>").split()
+            self.reactor.callFromThread(self._reportSpeed, source, int(serial), float(speed))
+            return
         self.mpvErrorCheck(line)
         if "<chat>" in line:
             line = line.replace(constants.MPV_INPUT_BACKSLASH_SUBSTITUTE_CHARACTER, "\\")
@@ -520,6 +556,9 @@ class MpvPlayer(BasePlayer):
     def _set_defaults(self):
         self._paused = None
         self._position = 0.0
+        self._positionAnchoredAt = None
+        self._playbackSpeed = 1.0
+        self._speedCommand = 0
         self._duration = None
         self._filename = None
         self._filepath = None

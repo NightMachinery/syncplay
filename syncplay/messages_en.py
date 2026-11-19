@@ -38,6 +38,10 @@ en = {
     "rewind-notification": "Rewinded due to time difference with {}",  # User
     "fastforward-notification": "Fast-forwarded due to time difference with {}",  # User
     "slowdown-notification": "Slowing down due to time difference with {}",  # User
+    "shared-speed-stock-notice": "Playback speed changed locally. This server does not support sharing it.",
+    "shared-speed-mixed-room-notice": "Shared playback speed requires support from every viewer. This room is using 1×.",
+    "shared-speed-controller-notice": "Only a room operator can change the shared playback speed.",
+    "shared-speed-range-notice": "Choose a playback speed between 0.25× and 4× for this room.",
     "revert-notification": "Reverting speed back to normal",
 
     "pause-notification": "{} paused at {}",  # User, Time

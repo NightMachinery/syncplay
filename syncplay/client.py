@@ -41,6 +41,7 @@ from syncplay.constants import PRIVACY_SENDHASHED_MODE, PRIVACY_DONTSEND_MODE, \
     PRIVACY_HIDDENFILENAME
 from syncplay.messages import getMissingStrings, getMessage, isNoOSDMessage
 from syncplay.connection import RoomConnection
+from syncplay.playback import SHARED_PLAYBACK_SPEED, validRoomSpeed
 from syncplay.protocols import SyncClientProtocol
 from syncplay.watched import WatchedManager
 from syncplay.utils import isMacOS
@@ -137,6 +138,16 @@ class SyncplayClient(object):
         self._lastPlayerUpdate = None
         self._playerPosition = 0.0
         self._playerPaused = True
+        self._localSpeed = 1.0
+        self._localBaseSpeed = 1.0
+        self._playerRatePending = False
+        self._roomSpeedState = None
+        self._pendingSpeed = None
+        self._queuedSpeed = None
+        self._deferredPlayback = None
+        self._speedNotices = set()
+        self._appliedRoomSpeed = False
+        self._waitingForSpeedProbe = False
 
         self._lastGlobalUpdate = None
         self._globalPosition = 0.0
@@ -180,9 +191,6 @@ class SyncplayClient(object):
         self.userlist.currentUser.setControllerStatus(False)
         self.userlist.clearList()
         self.ui.setSSLMode(False)
-        if self._speedChanged and self._player:
-            self._player.setSpeed(1.0)
-            self._speedChanged = False
 
     def connectionStatus(self, phase, failedPhase=None, reason=None, delay=None,
                          announce=True, rejoined=False):
@@ -203,6 +211,13 @@ class SyncplayClient(object):
         self._cancelPlaylistLoadDeadline()
         self._roomPlaybackReady = False
         self._lastGlobalUpdate = None
+        if self._speedChanged:
+            self._resetSpeedCorrection()
+        self._roomSpeedState = None
+        self._pendingSpeed = None
+        self._queuedSpeed = None
+        self._deferredPlayback = None
+        self._speedNotices.clear()
         self.lastRewindTime = None
         self.lastAdvanceTime = None
         self.behindFirstDetected = None
@@ -219,6 +234,125 @@ class SyncplayClient(object):
 
     def canSendPlayback(self):
         return self.canSendPlaylist() and self._roomPlaybackReady
+
+    def supportsSharedSpeed(self):
+        return self._player is not None and getattr(self._player, "sharedSpeedReady", False) is True
+
+    def hasSharedSpeedServer(self):
+        return self.serverFeatures.get(SHARED_PLAYBACK_SPEED) is True
+
+    def _roomSpeed(self):
+        return self._roomSpeedState[0] if self._roomSpeedState is not None else 1.0
+
+    def _playbackBaseSpeed(self):
+        if self._roomSpeedState is not None:
+            return self._roomSpeed()
+        return self._localBaseSpeed
+
+    def _storeLocalSpeed(self, speed):
+        now = time.monotonic()
+        if self._lastPlayerUpdate is not None and not self._playerPaused:
+            self._playerPosition += (now - self._lastPlayerUpdate) * self._localSpeed
+            self._lastPlayerUpdate = now
+        self._localSpeed = speed
+
+    def _setPlayerSpeed(self, speed):
+        if self._player is None:
+            return
+        self._playerRatePending = self.supportsSharedSpeed()
+        self._player.setSpeed(speed)
+        if not self._playerRatePending:
+            self._storeLocalSpeed(speed)
+
+    def _resetSpeedCorrection(self):
+        self._speedChanged = False
+        self._setPlayerSpeed(self._playbackBaseSpeed())
+
+    def _showSpeedNotice(self, message):
+        if message not in self._speedNotices:
+            self._speedNotices.add(message)
+            self.ui.showMessage(getMessage(message), noPlayer=True)
+
+    def playerSpeedObserved(self, player, speed, native):
+        if player is not self._player:
+            return
+        self._storeLocalSpeed(speed)
+        self._playerRatePending = False
+        if self._waitingForSpeedProbe and self.supportsSharedSpeed():
+            self._finishSpeedProbe()
+        if self._protocol:
+            self._protocol.updateSharedSpeedCapability()
+        if not self.isConnectedAndInARoom() or not self.hasSharedSpeedServer():
+            if not self._appliedRoomSpeed and (native or not self._speedChanged):
+                self._localBaseSpeed = speed
+            if native:
+                self._speedChanged = False
+                if self.isConnectedAndInARoom() and self._localBaseSpeed != 1.0:
+                    self._showSpeedNotice("shared-speed-stock-notice")
+            return
+        self._flushDeferredPlayback()
+        if not native or self._roomSpeedState is None:
+            return
+        self._speedChanged = False
+        if not self.canSendPlayback():
+            self._setPlayerSpeed(self._roomSpeed())
+        elif not self._roomSpeedState[1]:
+            self._showSpeedNotice("shared-speed-mixed-room-notice")
+            self._setPlayerSpeed(self._roomSpeed())
+        elif not validRoomSpeed(speed):
+            self._showSpeedNotice("shared-speed-range-notice")
+            self._setPlayerSpeed(self._roomSpeed())
+        elif self._pendingSpeed is not None:
+            self._queuedSpeed = speed
+        elif speed != self._roomSpeed():
+            self._requestPlaybackSpeed(speed)
+
+    def _requestPlaybackSpeed(self, speed):
+        revision = self._roomSpeedState[2]
+        self._pendingSpeed = (revision, speed)
+        self._protocol.requestPlaybackSpeed(speed, revision)
+
+    def playbackSpeedResult(self, revision, accepted):
+        if self._pendingSpeed is None or self._pendingSpeed[0] != revision:
+            return
+        self._pendingSpeed = None
+        queued, self._queuedSpeed = self._queuedSpeed, None
+        if not accepted:
+            if self._roomSpeedState[1] and not self.userlist.currentUser.canControl():
+                self._showSpeedNotice("shared-speed-controller-notice")
+            self._setPlayerSpeed(self._roomSpeed())
+        elif (queued is not None and queued != self._roomSpeed()
+              and self._roomSpeedState[1] and self.canSendPlayback()):
+            self._requestPlaybackSpeed(queued)
+        self._flushDeferredPlayback()
+
+    def _sendPlaybackChange(self, position, paused, seeked):
+        if self._roomSpeedState is not None and self.getLocalSpeedState(True) is None:
+            self._deferredPlayback = position, paused, seeked
+        else:
+            self._protocol.sendState(position, paused, seeked, None, True)
+
+    def _flushDeferredPlayback(self):
+        if (self._deferredPlayback is not None and self.canSendPlayback()
+                and self.getLocalSpeedState(True) is not None):
+            position, paused, seeked = self._deferredPlayback
+            self._deferredPlayback = None
+            self._sendPlaybackChange(position if seeked else self.getPlayerPosition(), paused, seeked)
+
+    def getLocalSpeedState(self, stateChange=False):
+        if self._roomSpeedState is None or self._playerRatePending or self._pendingSpeed is not None:
+            return None
+        speed = self._localSpeed
+        if not stateChange and self._config["dontSlowDownWithMe"]:
+            speed = self._roomSpeed()
+        return {"speedRevision": self._roomSpeedState[2], "localSpeed": speed}
+
+    def _finishSpeedProbe(self):
+        if not self._waitingForSpeedProbe:
+            return
+        self._waitingForSpeedProbe = False
+        if self._protocol:
+            self._protocol.playerCapabilityReady()
 
     def initPlayer(self, player):
         if not self._running:
@@ -323,11 +457,11 @@ class SyncplayClient(object):
             self._lastPlayerUpdate = time.monotonic()
             if (pauseChange or seeked) and self._protocol:
                 if self.recentlyRewound() or self._recentlyAdvanced():
-                    self._protocol.sendState(self._globalPosition, self.getPlayerPaused(), False, None, True)
+                    self._sendPlaybackChange(self._globalPosition, self.getPlayerPaused(), False)
                     return
                 if seeked:
                     self.playerPositionBeforeLastSeek = self.getGlobalPosition()
-                self._protocol.sendState(self.getPlayerPosition(), self.getPlayerPaused(), seeked, None, True)
+                self._sendPlaybackChange(self.getPlayerPosition(), self.getPlayerPaused(), seeked)
 
     def prepareToChangeToNewPlaylistItemAndRewind(self):
         self.ui.showDebugMessage("Preparing to change to new playlist index and rewind...")
@@ -477,20 +611,20 @@ class SyncplayClient(object):
             if self.getUsername() == setBy:
                 self.ui.showDebugMessage("Caught attempt to slow down due to time difference with self")
             else:
-                self._player.setSpeed(constants.SLOWDOWN_RATE)
                 self._speedChanged = True
+                self._setPlayerSpeed(self._playbackBaseSpeed() * constants.SLOWDOWN_RATE)
                 self.ui.showMessage(getMessage("slowdown-notification").format(setBy), hideFromOSD)
                 madeChangeOnPlayer = True
         elif self._speedChanged and diff < constants.SLOWDOWN_RESET_THRESHOLD:
-            self._player.setSpeed(1.00)
-            self._speedChanged = False
+            self._resetSpeedCorrection()
             self.ui.showMessage(getMessage("revert-notification"), hideFromOSD)
             madeChangeOnPlayer = True
         return madeChangeOnPlayer
 
     def _changePlayerStateAccordingToGlobalState(self, position, paused, doSeek, setBy):
         madeChangeOnPlayer = False
-        pauseChanged = paused != self.getGlobalPaused() or paused != self.getPlayerPaused()
+        pauseChanged = (paused != self.getGlobalPaused()
+                        or (self._deferredPlayback is None and paused != self.getPlayerPaused()))
         diff = self.getPlayerPosition() - position
         self._globalPaused = paused
         self._globalPosition = position
@@ -511,7 +645,10 @@ class SyncplayClient(object):
                         self.behindFirstDetected = time.time() + constants.FASTFORWARD_RESET_THRESHOLD
             else:
                 self.behindFirstDetected = None
-        if self._player.speedSupported and not doSeek and not paused and  not self._config['slowOnDesync'] == False:
+        if self._speedChanged and (doSeek or paused):
+            self._resetSpeedCorrection()
+        if (self._player.speedSupported and not doSeek and not paused and self._config['slowOnDesync']
+                and self._pendingSpeed is None and not self._playerRatePending):
             madeChangeOnPlayer = self._slowDownToCoverTimeDifference(diff, setBy)
         if paused == False and pauseChanged:
             madeChangeOnPlayer = self._serverUnpaused(setBy)
@@ -562,8 +699,9 @@ class SyncplayClient(object):
         target, targetPaused, applied = self._pendingPlayerBaseline
         elapsed = self.connection.seconds() - applied
         if not targetPaused:
-            target += elapsed
-        if paused == targetPaused and abs(position - target) <= constants.SEEK_THRESHOLD:
+            target += elapsed * self._roomSpeed()
+        if (not self._playerRatePending and paused == targetPaused
+                and abs(position - target) <= constants.SEEK_THRESHOLD):
             self._cancelPlaylistLoadDeadline()
             self._pendingPlayerBaseline = None
             self._roomPlaybackReady = True
@@ -582,15 +720,34 @@ class SyncplayClient(object):
             self._config["loadPlaylistFromFile"] = None
             self.playlist.loadPlaylistFromFile(path)
 
-    def updateGlobalState(self, position, paused, doSeek, setBy, messageAge):
+    def updateGlobalState(self, position, paused, doSeek, setBy, messageAge, speedState=None):
+        if doSeek or paused != self.getGlobalPaused():
+            self._deferredPlayback = None
+        speedChanged = False
+        if speedState is not None and self._roomSpeedState != speedState:
+            firstSpeed = self._roomSpeedState is None
+            speed, enabled, _ = speedState
+            speedChanged = speed != self._roomSpeed()
+            self._roomSpeedState = speedState
+            if not enabled:
+                self._showSpeedNotice("shared-speed-mixed-room-notice")
+            if firstSpeed or speedChanged or not enabled:
+                self._speedChanged = False
+                self._appliedRoomSpeed = True
+                self._setPlayerSpeed(speed)
+        elif speedState is None and self._appliedRoomSpeed and not self.hasSharedSpeedServer():
+            self._appliedRoomSpeed = False
+            self._localBaseSpeed = 1.0
+            self._setPlayerSpeed(1.0)
         if not paused:
-            position += messageAge
+            position += messageAge * self._roomSpeed()
         if not self._roomPlaybackReady:
             first = self._lastGlobalUpdate is None
             self._globalPosition = position
             self._globalPaused = paused
             self._lastGlobalUpdate = time.monotonic()
-            if first or self._pendingPlayerBaseline is None or doSeek or paused != self._pendingPlayerBaseline[1]:
+            if (first or speedChanged or self._pendingPlayerBaseline is None or doSeek
+                    or paused != self._pendingPlayerBaseline[1]):
                 self._applyRoomBaseline()
             if self._pendingPlayerBaseline is None and self._playlistLoadDeadline is None:
                 # A viewer without the selected media can still use chat and the roster.
@@ -629,7 +786,7 @@ class SyncplayClient(object):
         position = self._playerPosition
         if not self._playerPaused:
             diff = time.monotonic() - self._lastPlayerUpdate
-            position += diff
+            position += diff * self._localSpeed
         return position
 
     def getStoredPlayerPosition(self):
@@ -648,7 +805,7 @@ class SyncplayClient(object):
             return 0.0
         position = self._globalPosition
         if not self._globalPaused:
-            position += time.monotonic() - self._lastGlobalUpdate
+            position += (time.monotonic() - self._lastGlobalUpdate) * self._roomSpeed()
         return position
 
     def getGlobalPaused(self):
@@ -898,6 +1055,7 @@ class SyncplayClient(object):
         features["managedRooms"] = True
         features["persistentRooms"] = True
         features["setOthersReadiness"] = True
+        features[SHARED_PLAYBACK_SPEED] = self.supportsSharedSpeed()
 
         return features
 
@@ -952,6 +1110,7 @@ class SyncplayClient(object):
 
     def connected(self):
         self.lastConnectTime = time.time()
+        self._protocol.updateSharedSpeedCapability()
         readyState = self._config['readyAtStart'] if self.userlist.currentUser.isReady() is None else self.userlist.currentUser.isReady()
         if self.serverFeatures.get("readiness"):
             self._protocol.setReady(readyState, manuallyInitiated=False)
@@ -1029,6 +1188,9 @@ class SyncplayClient(object):
         if self._running:
             return
         self._running = True
+        if getattr(self._playerClass, "canObserveNativeSpeed", lambda: False)() is True:
+            self._waitingForSpeedProbe = True
+            reactor.callLater(constants.MPV_SPEED_PROBE_TIMEOUT, self._finishSpeedProbe)
         if self._playerClass:
             perPlayerArguments = utils.getPlayerArgumentsByPathAsArray(self._config['perPlayerArguments'], self._config['playerPath'])
             if perPlayerArguments:

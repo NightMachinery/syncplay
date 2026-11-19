@@ -356,8 +356,40 @@ mp.register_script_message('set_syncplayintf_options', function(e)
     set_syncplayintf_options(e)
 end)
 
+-- Keep the last value written by Syncplay in the same Lua event loop as the
+-- observer. An IPC write or a native speed key is otherwise indistinguishable
+-- from our own property changes.
+local syncplay_speed_serial = 0
+local last_speed = mp.get_property_native("speed")
+local reported_speed = false
+
+local function report_speed(source, speed)
+    if speed then
+        mp.msg.info(string.format("<syncplay-speed %s %d %.17g>", source, syncplay_speed_serial, speed))
+    end
+end
+
+mp.observe_property("speed", "number", function()
+    local speed = mp.get_property_native("speed")
+    if speed ~= last_speed then
+        last_speed = speed
+        report_speed("native", speed)
+    end
+end)
+
+mp.register_script_message("set_syncplay_speed", function(serial, value)
+    mp.set_property_native("speed", tonumber(value))
+    last_speed = mp.get_property_native("speed")
+    syncplay_speed_serial = tonumber(serial)
+    report_speed("applied", last_speed)
+end)
+
 function state_paused_and_position()
-    -- bob
+    if not reported_speed then
+        last_speed = mp.get_property_native("speed")
+        report_speed("initial", last_speed)
+        reported_speed = last_speed ~= nil
+    end
     local pause_status = tostring(mp.get_property_native("pause"))
     local position_status = tostring(mp.get_property_native("time-pos"))
     mp.command('print-text "<paused='..pause_status..', pos='..position_status..'>"')

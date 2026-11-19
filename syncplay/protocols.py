@@ -16,6 +16,7 @@ import syncplay
 from syncplay import utils
 from syncplay.constants import PING_MOVING_AVERAGE_WEIGHT, CONTROLLED_ROOMS_MIN_VERSION, USER_READY_MIN_VERSION, SHARED_PLAYLIST_MIN_VERSION, CHAT_MIN_VERSION, UNKNOWN_UI_MODE
 from syncplay.messages import getMessage
+from syncplay.playback import SHARED_PLAYBACK_SPEED, validRoomSpeed, validSpeedRevision
 from syncplay.utils import meetsMinVersion
 
 
@@ -87,6 +88,8 @@ class SyncClientProtocol(JSONCommandProtocol):
         self._pingService = PingService()
         self._earlyMessages = []
         self._sentHello = False
+        self._waitingForSpeedProbe = False
+        self._advertisedSharedSpeed = False
         self._startedTLS = False
         self._tlsVerified = False
         self._awaitingRoom = False
@@ -204,8 +207,11 @@ class SyncClientProtocol(JSONCommandProtocol):
     def sendHello(self):
         if not self._isCurrent() or self._sentHello:
             return
-        self._sentHello = True
         self._client.connection.awaitingHello(self)
+        self._waitingForSpeedProbe = self._client._waitingForSpeedProbe
+        if self._waitingForSpeedProbe:
+            return
+        self._sentHello = True
         hello = {}
         hello["username"] = self._client.requestedUsername
         password = self._client.getPassword()
@@ -217,6 +223,7 @@ class SyncClientProtocol(JSONCommandProtocol):
         hello["version"] = "1.2.255"  # Used so newer clients work on 1.2.X server
         hello["realversion"] = syncplay.version
         hello["features"] = self._client.getFeatures()
+        self._advertisedSharedSpeed = hello["features"][SHARED_PLAYBACK_SPEED]
         self.sendMessage({"Hello": hello})
 
     def _SetUser(self, users):
@@ -274,6 +281,22 @@ class SyncClientProtocol(JSONCommandProtocol):
                 self._client.playlist.changePlaylist(values["files"], values["user"], remote=True)
             elif command == "features":
                 self._client.setUserFeatures(values["username"], values['features'])
+            elif command == "playbackSpeed" and self._client.hasSharedSpeedServer() and not self._awaitingRoom:
+                if isinstance(values, dict) and validSpeedRevision(values.get("speedRevision")):
+                    self._client.playbackSpeedResult(values["speedRevision"], values.get("accepted") is True)
+
+    def playerCapabilityReady(self):
+        if self._waitingForSpeedProbe:
+            self.sendHello()
+
+    def updateSharedSpeedCapability(self):
+        capable = self._client.supportsSharedSpeed()
+        if self.logged and self._client.hasSharedSpeedServer() and capable != self._advertisedSharedSpeed:
+            self._advertisedSharedSpeed = capable
+            self.sendFeaturesUpdate({SHARED_PLAYBACK_SPEED: capable})
+
+    def requestPlaybackSpeed(self, speed, revision):
+        self.sendSet({"playbackSpeed": {"speed": speed, "speedRevision": revision}})
 
     def sendFeaturesUpdate(self, features):
         self.sendSet({"features": features})
@@ -333,6 +356,7 @@ class SyncClientProtocol(JSONCommandProtocol):
 
     def handleState(self, state):
         position, paused, doSeek, setBy = None, None, None, None
+        speedState = None
         messageAge, latencyCalculation = 0, None
         try:
             ignore = state.get("ignoringOnTheFly", {})
@@ -343,6 +367,14 @@ class SyncClientProtocol(JSONCommandProtocol):
                 self.clientIgnoringOnTheFly = 0
             if "playstate" in state:
                 position, paused, doSeek, setBy = self._extractStatePlaystateArguments(state)
+                if self._client.hasSharedSpeedServer() and self._advertisedSharedSpeed:
+                    playstate = state["playstate"]
+                    speed = playstate.get("speed")
+                    enabled = playstate.get("speedEnabled")
+                    revision = playstate.get("speedRevision")
+                    if (validRoomSpeed(speed) and type(enabled) is bool and validSpeedRevision(revision)
+                            and (enabled or speed == 1.0)):
+                        speedState = speed, enabled, revision
             if "ping" in state:
                 messageAge, latencyCalculation = self._handleStatePing(state)
             usable = (type(position) in (float, int) and math.isfinite(position)
@@ -353,7 +385,10 @@ class SyncClientProtocol(JSONCommandProtocol):
         if not self._awaitingRoom and (usable or "ping" in state):
             self._client.connection.stateReceived(self, usable)
         if usable and not self._awaitingRoom and not self.clientIgnoringOnTheFly:
-            self._client.updateGlobalState(position, paused, doSeek, setBy, messageAge)
+            if speedState is None:
+                self._client.updateGlobalState(position, paused, doSeek, setBy, messageAge)
+            else:
+                self._client.updateGlobalState(position, paused, doSeek, setBy, messageAge, speedState)
         if self.serverIgnoringOnTheFly:
             # Acknowledge the server's forced update without echoing the old player state.
             self.sendState(None, None, None, latencyCalculation)
@@ -364,6 +399,9 @@ class SyncClientProtocol(JSONCommandProtocol):
     def sendState(self, position, paused, doSeek, latencyCalculation, stateChange=False):
         if not self._client.canSendPlayback():
             position, paused, stateChange = None, None, False
+        speedState = self._client.getLocalSpeedState(stateChange)
+        if self._client.hasSharedSpeedServer() and self._advertisedSharedSpeed and speedState is None:
+            position, paused, stateChange = None, None, False
         state = {}
         positionAndPausedIsSet = position is not None and paused is not None
         clientIgnoreIsNotSet = self.clientIgnoringOnTheFly == 0 or self.serverIgnoringOnTheFly != 0
@@ -373,6 +411,8 @@ class SyncClientProtocol(JSONCommandProtocol):
             state["playstate"]["paused"] = paused
             if doSeek:
                 state["playstate"]["doSeek"] = doSeek
+            if speedState is not None:
+                state["playstate"].update(speedState)
         state["ping"] = {}
         if latencyCalculation:
             state["ping"]["latencyCalculation"] = latencyCalculation
@@ -535,6 +575,7 @@ class SyncServerProtocol(JSONCommandProtocol):
         self._logged = False
         self.clientIgnoringOnTheFly = 0
         self.serverIgnoringOnTheFly = 0
+        self._forcedStateSequence = 0
         self._pingService = PingService()
         self._clientLatencyCalculation = 0
         self._clientLatencyCalculationArrivalTime = 0
@@ -641,7 +682,7 @@ class SyncServerProtocol(JSONCommandProtocol):
             self._factory.sendChat(self._watcher, chatMessage)
 
     def setFeatures(self, features):
-        self._features = features
+        self._features = features if isinstance(features, dict) else None
 
     def sendFeaturesUpdate(self):
         self.sendSet({"features": self.getFeatures()})
@@ -688,8 +729,21 @@ class SyncServerProtocol(JSONCommandProtocol):
             elif command == "playlistIndex":
                 self._factory.setPlaylistIndex(self._watcher, set_[1]['index'])
             elif command == "features":
-                # TODO: Check
-                self._watcher.setFeatures(set_[1])
+                if isinstance(set_[1], dict):
+                    self.getFeatures().update(set_[1])
+                    self._watcher.getRoom().refreshSpeedEligibility()
+            elif command == "playbackSpeed":
+                self._handlePlaybackSpeed(set_[1])
+
+    def _handlePlaybackSpeed(self, request):
+        if not self._watcher.supportsSharedSpeed() or not isinstance(request, dict):
+            return
+        revision = request.get("speedRevision")
+        if not validSpeedRevision(revision):
+            return
+        room = self._watcher.getRoom()
+        accepted = room.requestPlaybackSpeed(self._watcher, request.get("speed"), revision)
+        self.sendSet({"playbackSpeed": {"speedRevision": revision, "accepted": accepted}})
 
     def sendSet(self, setting):
         self.sendMessage({"Set": setting})
@@ -809,6 +863,9 @@ class SyncServerProtocol(JSONCommandProtocol):
                      "doSeek": doSeek,
                      "setBy": setBy.getName() if setBy else None
         }
+        if self._watcher.supportsSharedSpeed():
+            speed, enabled, revision = self._watcher.getRoom().getSharedSpeed()
+            playstate.update(speed=speed, speedEnabled=enabled, speedRevision=revision)
         ping = {
                 "latencyCalculation": self._pingService.newTimestamp(),
                 "serverRtt": self._pingService.getRtt()
@@ -821,7 +878,8 @@ class SyncServerProtocol(JSONCommandProtocol):
                  "playstate": playstate,
                 }
         if forced:
-            self.serverIgnoringOnTheFly += 1
+            self._forcedStateSequence += 1
+            self.serverIgnoringOnTheFly = self._forcedStateSequence
         if self.serverIgnoringOnTheFly or self.clientIgnoringOnTheFly:
             state["ignoringOnTheFly"] = {}
             if self.serverIgnoringOnTheFly:
@@ -841,6 +899,7 @@ class SyncServerProtocol(JSONCommandProtocol):
     @requireLogged
     def handleState(self, state):
         position, paused, doSeek, latencyCalculation = None, None, None, None
+        speedRevision, localSpeed = None, None
         if "ignoringOnTheFly" in state:
             ignore = state["ignoringOnTheFly"]
             if "server" in ignore:
@@ -850,6 +909,9 @@ class SyncServerProtocol(JSONCommandProtocol):
                 self.clientIgnoringOnTheFly = ignore["client"]
         if "playstate" in state:
             position, paused, doSeek = self._extractStatePlaystateArguments(state)
+            if self._watcher.supportsSharedSpeed():
+                speedRevision = state["playstate"].get("speedRevision")
+                localSpeed = state["playstate"].get("localSpeed")
         if "ping" in state:
             latencyCalculation = state["ping"]["latencyCalculation"] if "latencyCalculation" in state["ping"] else 0
             clientRtt = state["ping"]["clientRtt"] if "clientRtt" in state["ping"] else 0
@@ -857,7 +919,8 @@ class SyncServerProtocol(JSONCommandProtocol):
             self._clientLatencyCalculationArrivalTime = time.time()
             self._pingService.receiveMessage(latencyCalculation, clientRtt)
         if self.serverIgnoringOnTheFly == 0:
-            self._watcher.updateState(position, paused, doSeek, self._pingService.getLastForwardDelay())
+            self._watcher.updateState(position, paused, doSeek, self._pingService.getLastForwardDelay(),
+                                      speedRevision, localSpeed)
 
     def handleError(self, error):
         self.dropWithError(error["message"])  # TODO: more processing and fallbacking

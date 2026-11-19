@@ -1,8 +1,10 @@
 import argparse
 import codecs
 import hashlib
+import math
 import os
 import time
+from itertools import count
 from string import Template
 
 from twisted.enterprise import adbapi
@@ -19,6 +21,7 @@ except:
 import syncplay
 from syncplay import constants
 from syncplay.messages import getMessage
+from syncplay.playback import SHARED_PLAYBACK_SPEED, validRoomSpeed, validSpeedRevision
 from syncplay.protocols import SyncServerProtocol
 from syncplay.utils import RoomPasswordProvider, NotControlledRoom, RandomStringGenerator, meetsMinVersion, playlistIsValid, truncateText, getListAsMultilineString, convertMultilineStringToList
 
@@ -98,6 +101,7 @@ class SyncFactory(Factory):
         features["maxRoomNameLength"] = constants.MAX_ROOM_NAME_LENGTH
         features["maxFilenameLength"] = constants.MAX_FILENAME_LENGTH
         features["setOthersReadiness"] = True
+        features[SHARED_PLAYBACK_SPEED] = True
 
         return features
 
@@ -130,7 +134,8 @@ class SyncFactory(Factory):
 
     def setWatcherRoom(self, watcher, roomName, asJoin=False):
         roomName = truncateText(roomName, constants.MAX_ROOM_NAME_LENGTH)
-        self._roomManager.moveWatcher(watcher, roomName)
+        if watcher.getRoom() is None or watcher.getRoom().getName() != roomName:
+            self._roomManager.moveWatcher(watcher, roomName)
         if asJoin:
             self.sendJoinMessage(watcher)
         else:
@@ -143,6 +148,8 @@ class SyncFactory(Factory):
         if RoomPasswordProvider.isControlledRoom(roomName):
             for controller in room.getControllers():
                 watcher.sendControlledRoomAuthStatus(True, controller, roomName)
+        if not asJoin:
+            self.sendState(watcher, doSeek=True, forcedUpdate=True)
 
     def sendRoomSwitchMessage(self, watcher):
         l = lambda w: w.sendSetting(watcher.getName(), watcher.getRoom(), None, None)
@@ -535,6 +542,7 @@ class PublicRoomManager(RoomManager):
 class Room(object):
     STATE_PAUSED = 0
     STATE_PLAYING = 1
+    _speedRevisions = count()
 
     def __init__(self, name, roomsdbhandle):
         self._name = name
@@ -544,10 +552,13 @@ class Room(object):
         self._setBy = None
         self._playlist = []
         self._playlistIndex = None
-        self._lastUpdate = time.time()
+        self._lastUpdate = time.monotonic()
         self._lastSavedUpdate = 0
         self._position = 0
         self._permanent = False
+        self._speed = 1.0
+        self._speedEnabled = False
+        self._speedRevision = next(self._speedRevisions)
 
     def __str__(self, *args, **kwargs):
         return self.getName()
@@ -594,29 +605,66 @@ class Room(object):
     def getName(self):
         return self._name
 
+    def _playbackWatchers(self):
+        return self._watchers.values()
+
     def getPosition(self):
-        age = time.time() - self._lastUpdate
-        if self._watchers and age > 1:
-            watcher = min(self._watchers.values())
-            self._setBy = watcher
-            self._position = watcher.getPosition()
-            self._lastSavedUpdate = self._lastUpdate = time.time()
-            return self._position
-        elif self._position is not None:
-            return self._position + (age if self._playState == self.STATE_PLAYING else 0)
-        else:
-            return 0
+        now = time.monotonic()
+        age = now - self._lastUpdate
+        if age > 1:
+            watcher = min((w for w in self._playbackWatchers() if w.hasPlaybackSample()), default=None)
+            if watcher is not None:
+                self._setBy = watcher
+                self._position = watcher.getPosition()
+                self._lastUpdate = now
+                self._lastSavedUpdate = time.time()
+                return self._position
+        return (self._position or 0) + (age * self._speed if self.isPlaying() else 0)
+
+    def getSharedSpeed(self):
+        return self._speed, self._speedEnabled, self._speedRevision
+
+    def refreshSpeedEligibility(self, position=None):
+        enabled = bool(self._watchers) and all(w.supportsSharedSpeed() for w in self._watchers.values())
+        if enabled != self._speedEnabled:
+            self._updateSpeed(self._speed if enabled else 1.0, enabled, position)
+
+    def requestPlaybackSpeed(self, watcher, speed, revision):
+        if (not validRoomSpeed(speed) or not validSpeedRevision(revision)
+                or revision != self._speedRevision or not self._speedEnabled
+                or not watcher.supportsSharedSpeed() or not self.canControl(watcher)):
+            return False
+        if speed != self._speed:
+            self._updateSpeed(speed, self._speedEnabled)
+        return True
+
+    def _updateSpeed(self, speed, enabled, position=None):
+        if position is None:
+            position = self.getPosition()
+        self._speed = speed
+        self._speedEnabled = enabled
+        self._speedRevision = next(self._speedRevisions)
+        self._anchorPosition(position)
+        for watcher in self.getWatchers():
+            if watcher.supportsSharedSpeed():
+                watcher.sendState(position, self.isPaused(), False, self._setBy, True)
+
+    def _anchorPosition(self, position):
+        self._position = position
+        self._lastUpdate = time.monotonic()
+        self._lastSavedUpdate = time.time()
+        for watcher in self._watchers.values():
+            watcher.anchorPosition(position)
 
     def setPaused(self, paused=STATE_PAUSED, setBy=None):
+        self._anchorPosition(self.getPosition())
         self._playState = paused
         self._setBy = setBy
         self.writeToDb()
 
     def setPosition(self, position, setBy=None):
-        self._position = position
-        for watcher in self._watchers.values():
-            watcher.setPosition(position)
-            self._setBy = setBy
+        self._anchorPosition(position)
+        self._setBy = setBy
         self.writeToDb()
 
     def setPermanent(self, newState):
@@ -632,18 +680,21 @@ class Room(object):
         return list(self._watchers.values())
 
     def addWatcher(self, watcher):
-        if self._watchers or self.isPersistent():
-            watcher.setPosition(self.getPosition())
+        position = self.getPosition()
         self._watchers[watcher.getName()] = watcher
         watcher.setRoom(self)
+        watcher.anchorPosition(position)
+        self.refreshSpeedEligibility(position)
 
     def removeWatcher(self, watcher):
         if watcher.getName() not in self._watchers:
             return
+        position = self.getPosition()
         del self._watchers[watcher.getName()]
         watcher.setRoom(None)
+        self.refreshSpeedEligibility(position)
         if not self._watchers and not self.isPersistent():
-            self._position = 0
+            self._anchorPosition(0)
         self.writeToDb()
 
     def isEmpty(self):
@@ -677,18 +728,8 @@ class ControlledRoom(Room):
         Room.__init__(self, name, roomsdbhandle)
         self._controllers = {}
 
-    def getPosition(self):
-        age = time.time() - self._lastUpdate
-        if self._controllers and age > 1:
-            watcher = min(self._controllers.values())
-            self._setBy = watcher
-            self._position = watcher.getPosition()
-            self._lastUpdate = time.time()
-            return self._position
-        elif self._position is not None:
-            return self._position + (age if self._playState == self.STATE_PLAYING else 0)
-        else:
-            return 0
+    def _playbackWatchers(self):
+        return self._controllers.values()
 
     def addController(self, watcher):
         self._controllers[watcher.getName()] = watcher
@@ -731,6 +772,9 @@ class Watcher(object):
         self._room = None
         self._file = None
         self._position = None
+        self._positionUpdatedOn = None
+        self._positionSpeed = 1.0
+        self._hasPlaybackSample = False
         self._lastUpdatedOn = time.time()
         self._sendStateTimer = None
         self._connector.setWatcher(self)
@@ -748,7 +792,6 @@ class Watcher(object):
             self._deactivateStateTimer()
         else:
             self._resetStateTimer()
-            self._askForStateUpdate(True, True)
 
     def setReady(self, ready):
         self._ready = ready
@@ -774,17 +817,26 @@ class Watcher(object):
     def getFile(self):
         return self._file
 
-    def setPosition(self, position):
+    def hasPlaybackSample(self):
+        return self._hasPlaybackSample
+
+    def anchorPosition(self, position):
+        self.setPosition(position, self._room.getSharedSpeed()[0])
+        self._hasPlaybackSample = False
+
+    def setPosition(self, position, speed):
         self._position = position
+        self._positionUpdatedOn = time.monotonic()
+        self._positionSpeed = speed
 
     def getPosition(self):
         if self._position is None:
             return None
         if self._room.isPlaying():
-            timePassedSinceSet = time.time() - self._lastUpdatedOn
+            timePassedSinceSet = time.monotonic() - self._positionUpdatedOn
         else:
             timePassedSinceSet = 0
-        return self._position + timePassedSinceSet
+        return self._position + timePassedSinceSet * self._positionSpeed
 
     def sendSetting(self, user, room, file_, event):
         self._connector.sendUserSetting(user, room, file_, event)
@@ -822,6 +874,9 @@ class Watcher(object):
         clientFeatures = self._connector.getFeatures()
         return clientFeatures[clientFeature] if clientFeature in clientFeatures else False
 
+    def supportsSharedSpeed(self):
+        return self.supportsFeature(SHARED_PLAYBACK_SPEED) is True
+
     def sendSetReady(self, username, isReady, manuallyInitiated=True, setByUsername=None):
         self._connector.sendSetReady(username, isReady, manuallyInitiated, setByUsername)
 
@@ -832,15 +887,16 @@ class Watcher(object):
         self._connector.setPlaylist(username, files)
 
     def __lt__(self, b):
-        if self.getPosition() is None or self._file is None:
+        if not self.hasPlaybackSample() or self._file is None:
             return False
-        if b.getPosition() is None or b.getFile() is None:
+        if not b.hasPlaybackSample() or b.getFile() is None:
             return True
         return self.getPosition() < b.getPosition()
 
     def _scheduleSendState(self):
-        self._sendStateTimer = task.LoopingCall(self._askForStateUpdate)
-        self._sendStateTimer.start(constants.SERVER_STATE_INTERVAL)
+        if self._room is not None:
+            self._sendStateTimer = task.LoopingCall(self._askForStateUpdate)
+            self._sendStateTimer.start(constants.SERVER_STATE_INTERVAL)
 
     def _askForStateUpdate(self, doSeek=False, forcedUpdate=False):
         self._server.sendState(self, doSeek, forcedUpdate)
@@ -849,7 +905,7 @@ class Watcher(object):
         if self._sendStateTimer:
             if self._sendStateTimer.running:
                 self._sendStateTimer.stop()
-            self._sendStateTimer.start(constants.SERVER_STATE_INTERVAL)
+            self._sendStateTimer.start(constants.SERVER_STATE_INTERVAL, now=False)
 
     def _deactivateStateTimer(self):
         if self._sendStateTimer and self._sendStateTimer.running:
@@ -867,19 +923,24 @@ class Watcher(object):
             return False
         return self._room.isPaused() and not paused or not self._room.isPaused() and paused
 
-    def _updatePositionByAge(self, messageAge, paused, position):
-        if not paused:
-            position += messageAge
-        return position
-
-    def updateState(self, position, paused, doSeek, messageAge):
-        pauseChanged = self.__hasPauseChanged(paused)
+    def updateState(self, position, paused, doSeek, messageAge, speedRevision=None, localSpeed=None):
         self._lastUpdatedOn = time.time()
+        room = self.getRoom()
+        speed, _, revision = room.getSharedSpeed()
+        if (self.supportsSharedSpeed() and position is not None
+                and (not validSpeedRevision(speedRevision) or speedRevision != revision)):
+            return
+        if (type(localSpeed) in (int, float) and 0 < localSpeed <= speed
+                and math.isclose(localSpeed, speed * constants.SLOWDOWN_RATE)):
+            speed = localSpeed
+        pauseChanged = self.__hasPauseChanged(paused)
         if pauseChanged:
-            self.getRoom().setPaused(Room.STATE_PAUSED if paused else Room.STATE_PLAYING, self)
+            room.setPaused(Room.STATE_PAUSED if paused else Room.STATE_PLAYING, self)
         if position is not None:
-            position = self._updatePositionByAge(messageAge, paused, position)
-            self.setPosition(position)
+            if not paused:
+                position += messageAge * speed
+            self.setPosition(position, speed)
+            self._hasPlaybackSample = True
         if doSeek or pauseChanged:
             self._server.forcePositionUpdate(self, doSeek, paused)
 

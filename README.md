@@ -28,6 +28,8 @@ Solution to synchronize video playback across multiple instances of mpv, VLC, MP
 
 This fork automatically rejoins a desktop room after an interrupted connection. An unsuccessful first connection leaves the window and player open. Use **File → Reconnect** or type `retry` in the console.
 
+With the Night 3 server and a room full of supported mpv viewers, native mpv speed controls change playback speed for everyone. On an upstream server, mpv speed changes stay local. See [shared playback speed](docs/shared-playback-speed.md).
+
 ## Install on macOS
 
 Download `SyncPlayU-macOS.dmg` from the [latest SyncPlayU release](https://github.com/NightMachinery/syncplay/releases/latest), or install it with Homebrew. If Homebrew installed Syncplay, remove that cask first to switch while keeping its settings.
