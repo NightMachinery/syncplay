@@ -1,12 +1,12 @@
 # SyncPlayU desktop release
 
-The SyncPlayU release pairs upstream Syncplay 1.7.7 with Night 2. About, the normal desktop startup log and `--version` display both. `--version-json` returns `upstream_version` and `night_version` separately. Connections continue to use the upstream numeric version.
+The SyncPlayU release pairs upstream Syncplay 1.7.7 with Night 3. About, the normal desktop startup log and `--version` display both. `--version-json` returns `upstream_version` and `night_version` separately. Connections continue to use the upstream numeric version.
 
 The [latest GitHub release](https://github.com/NightMachinery/syncplay/releases/latest) includes `SyncPlayU-macOS.dmg` and `SyncPlayU-release.json`. The DMG contains `SyncPlayU.app` for Apple Silicon with macOS 14.0 or later. Its bundle identifier is `io.github.NightMachinery.SyncPlayU`. The JSON records the source commit, architecture, minimum macOS version and SHA-256 of the branded download.
 
 ## Build on macOS
 
-Use an Apple Silicon Mac and a framework build of Python. The Night 2 build uses Python 3.12, PySide6 Essentials 6.8.3 and py2app 0.28.8. Build in a disposable checkout of the release commit on a disk with room for a virtual environment and the application bundle.
+Use an Apple Silicon Mac and a framework build of Python. The build uses Python 3.12, PySide6 Essentials 6.8.3 and py2app 0.28.8. Build in a disposable checkout of the release commit on a disk with room for a virtual environment and the application bundle.
 
 ```sh
 python3.12 -m venv .build-venv
@@ -26,5 +26,7 @@ The signing step removes library search paths inherited from the build machine. 
 Qt uses `syncplay/resources/syncplayu.png`. The macOS bundle uses `syncplay/resources/syncplayu.icns`, a multi-size icon with transparent Dock padding derived from the same artwork.
 
 ## Verification
+
+Night 3 passed 34 deterministic tests. See [shared playback speed](shared-playback-speed.md) for the real-mpv, mixed-client and stock-server results and how to verify an upgraded server.
 
 Night 2 passed 25 deterministic tests. On macOS 14.3.1, the app copied from the DMG joined a stock server in console and offscreen Qt modes and synchronized synthetic media in mpv. The console recovered after a three-second drop. Both clients sent `1.7.7` in their Hello. The packaged client also rejected an untrusted TLS certificate. The CLI, Qt startup log and About showed the SyncPlayU name and both versions. Both icons matched the project assets. The bundle passed strict code-signature verification and an audit of all 90 Mach-O files.
