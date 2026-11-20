@@ -41,6 +41,14 @@ fi
 brew install --cask NightMachinery/tap/syncplayu
 ```
 
+The current build is ad-hoc signed and unnotarized. If macOS blocks it after installation or an upgrade, try opening SyncPlayU, then choose **Open Anyway** in **System Settings → Privacy & Security**. [Apple’s first-launch instructions](https://support.apple.com/en-us/102445)
+
+If macOS still blocks a copy you got from this tap or the official SyncPlayU release, remove its quarantine attribute in Terminal, then open it again. Adjust the path if you installed it outside `/Applications`.
+
+```sh
+xattr -d com.apple.quarantine /Applications/SyncPlayU.app
+```
+
 For a bug report, include both the upstream and Night versions from About, the startup log or `--version`. Use `--version-json` to read them separately from a script. See the [desktop release details](docs/desktop-release.md).
 
 To run from this checkout, install the dependencies with `python -m pip install -r requirements.txt -r requirements_gui.txt`, then run `python syncplayClient.py` and choose your server, room and media player. See the [desktop recovery behavior and verification](docs/desktop-reconnection.md).
