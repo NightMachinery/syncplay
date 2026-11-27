@@ -30,7 +30,7 @@ def check_window(executable):
         while time.monotonic() < deadline and process.poll() is None:
             windows = windows_for(process.pid)
             for handle, title, visible in windows:
-                if visible and title == "SyncPlayU configuration":
+                if visible and title in ("SyncPlayU configuration", "SyncPlayU configuration - SyncPlayU"):
                     print(f"Opened: {title}")
                     win32gui.PostMessage(handle, win32con.WM_CLOSE, 0, 0)
                     if process.wait(timeout=10) == 0:
