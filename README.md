@@ -32,6 +32,8 @@ With the Night 3 server and a room full of supported mpv viewers, native mpv spe
 
 ## Use on Windows
 
+[Download the Windows x64 installer](https://github.com/NightMachinery/syncplay/releases/latest/download/SyncPlayU-Windows-x64-Setup.exe) and run it. Open SyncPlayU from the Start menu. The installer is unsigned and installs for your Windows account.
+
 [Download the Windows x64 ZIP](https://github.com/NightMachinery/syncplay/releases/latest/download/SyncPlayU-Windows-x64.zip), extract the whole archive to a writable folder, and open `SyncPlayU.exe`. Keep `syncplay.ini` beside it to store the connection and playback settings there. Choose your media player in the configuration window.
 
 ## Install on macOS

@@ -6,9 +6,13 @@ The [latest GitHub release](https://github.com/NightMachinery/syncplay/releases/
 
 ## Build on Windows
 
-Run the **SyncPlayU Windows portable** workflow from the intended source commit. It uses Windows Server 2022 x64, Python 3.11, PySide6 Essentials 6.11.1 and py2exe 0.14.0.0. The workflow runs the unit tests, extracts the ZIP, checks both CLI version formats, and opens the packaged configuration window before uploading the build artifact.
+Run the **SyncPlayU Windows release** workflow from the intended source commit. It uses Windows Server 2022 x64, Python 3.11, PySide6 Essentials 6.11.1 and py2exe 0.14.0.0. The workflow runs the unit tests, extracts the ZIP, checks both CLI version formats, and opens the packaged configuration window before building the installer with NSIS. The Windows runner then tests installation, GUI startup, reinstall, and uninstall, including preservation of the settings file.
 
 The Windows download is `SyncPlayU-Windows-x64.zip`. Extract the entire archive to a writable folder and run `SyncPlayU.exe`. The paired `SyncPlayUConsole.exe` supports `--version` and `--version-json`. The archive includes a blank `syncplay.ini` for portable connection and playback settings, and `build-info.json` records the exact source commit and both version numbers. The Windows executables are unsigned.
+
+Install `SyncPlayU-Windows-x64-Setup.exe` for the current user. It adds a Start menu shortcut and an Installed Apps entry. The default install folder is `%LOCALAPPDATA%\Programs\SyncPlayU`. Reinstalling and uninstalling preserve `syncplay.ini` and files the installer did not ship.
+
+The installer is unsigned. A self-signed Authenticode certificate can be reused for local testing where the certificate is explicitly trusted. Public releases need a signing identity trusted by Windows to establish publisher trust. [Windows code signing options](https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/code-signing-options)
 
 ## Build on macOS
 
