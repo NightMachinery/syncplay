@@ -4,6 +4,12 @@ The SyncPlayU release pairs upstream Syncplay 1.7.7 with Night 3. About, the nor
 
 The [latest GitHub release](https://github.com/NightMachinery/syncplay/releases/latest) includes `SyncPlayU-macOS.dmg` and `SyncPlayU-release.json`. The DMG contains `SyncPlayU.app` for Apple Silicon with macOS 14.0 or later. Its bundle identifier is `io.github.NightMachinery.SyncPlayU`. The JSON records the source commit, architecture, minimum macOS version and SHA-256 of the branded download.
 
+## Build on Windows
+
+Run the **SyncPlayU Windows portable** workflow from the intended source commit. It uses Windows Server 2022 x64, Python 3.11, PySide6 Essentials 6.11.1 and py2exe 0.14.0.0. The workflow runs the unit tests, extracts the ZIP, checks both CLI version formats, and opens the packaged configuration window before uploading the build artifact.
+
+The Windows download is `SyncPlayU-Windows-x64.zip`. Extract the entire archive to a writable folder and run `SyncPlayU.exe`. The paired `SyncPlayUConsole.exe` supports `--version` and `--version-json`. The archive includes a blank `syncplay.ini` for portable connection and playback settings, and `build-info.json` records the exact source commit and both version numbers. The Windows executables are unsigned.
+
 ## Build on macOS
 
 Use an Apple Silicon Mac and a framework build of Python. The build uses Python 3.12, PySide6 Essentials 6.8.3 and py2app 0.28.8. Build in a disposable checkout of the release commit on a disk with room for a virtual environment and the application bundle.

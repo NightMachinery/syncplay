@@ -30,6 +30,10 @@ This fork automatically rejoins a desktop room after an interrupted connection. 
 
 With the Night 3 server and a room full of supported mpv viewers, native mpv speed controls change playback speed for everyone. On an upstream server, mpv speed changes stay local. See [shared playback speed](docs/shared-playback-speed.md).
 
+## Use on Windows
+
+[Download the Windows x64 ZIP](https://github.com/NightMachinery/syncplay/releases/latest/download/SyncPlayU-Windows-x64.zip), extract the whole archive to a writable folder, and open `SyncPlayU.exe`. Keep `syncplay.ini` beside it to store the connection and playback settings there. Choose your media player in the configuration window.
+
 ## Install on macOS
 
 Download `SyncPlayU-macOS.dmg` from the [latest SyncPlayU release](https://github.com/NightMachinery/syncplay/releases/latest), or install it with Homebrew. If Homebrew installed Syncplay, remove that cask first to switch while keeping its settings.
