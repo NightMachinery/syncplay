@@ -1,4 +1,4 @@
-name: SyncPlayU Windows portable
+name: SyncPlayU Windows release
 
 on:
   workflow_dispatch:
@@ -67,9 +67,19 @@ jobs:
 
           python ci/windows-window-smoke.py "$app/SyncPlayU.exe"
 
+      - name: Build per-user installer
+        run: |
+          $compiler = Join-Path ${env:ProgramFiles(x86)} "NSIS/makensis.exe"
+          python ci/windows-installer.py $compiler SyncPlayU SyncPlayU-Windows-x64-Setup.exe
+
+      - name: Test installed app and uninstall
+        run: ./ci/windows-installer-smoke.ps1 -Installer SyncPlayU-Windows-x64-Setup.exe
+
       - uses: actions/upload-artifact@v6
         with:
           name: SyncPlayU-Windows-x64
-          path: SyncPlayU-Windows-x64.zip
+          path: |
+            SyncPlayU-Windows-x64.zip
+            SyncPlayU-Windows-x64-Setup.exe
           if-no-files-found: error
           compression-level: 0
