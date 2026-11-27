@@ -27,6 +27,7 @@ except ImportError:
     from py2exe.distutils_buildexe import py2exe
 
 import syncplay
+from syncplay.release import APP_NAME, NIGHT_VERSION
 from syncplay.messages import getMissingStrings, getMessage, getLanguages
 
 try:
@@ -98,7 +99,10 @@ def get_nsis_path():
     except WindowsError:
         return bin_name
 
-NSIS_COMPILE = get_nsis_path()
+PORTABLE_ONLY = "--portable-only" in sys.argv
+if PORTABLE_ONLY:
+    sys.argv.remove("--portable-only")
+NSIS_COMPILE = None if PORTABLE_ONLY else get_nsis_path()
 
 OUT_DIR = "syncplay_v{}".format(syncplay.version)
 SETUP_SCRIPT_PATH = "syncplay_setup.nsi"
@@ -708,6 +712,8 @@ class build_installer(py2exe):
         pruneUnneededLibraries()
         print('*** copying qt plugins ***')
         copyQtPlugins(qt_plugins)
+        if PORTABLE_ONLY:
+            return
         script = NSISScript()
         script.create()
         print("*** compiling the NSIS setup script ***")
@@ -730,22 +736,28 @@ else:
     qt_plugins = ['platforms\\qwindows.dll', 'styles\\qwindowsvistastyle.dll']
 
 
+client_name = APP_NAME if PORTABLE_ONLY else "Syncplay"
+client_icon = "syncplay\\resources\\syncplayu.ico" if PORTABLE_ONLY else "syncplay\\resources\\icon.ico"
+
 common_info = dict(
-    name='Syncplay',
-    version=syncplay.version,
+    name=client_name,
+    version="{}.{}".format(syncplay.version, NIGHT_VERSION) if PORTABLE_ONLY else syncplay.version,
     author='Uriziel',
     author_email='dev@syncplay.pl',
-    description='Syncplay',
+    description=client_name,
 )
 
 info = dict(
     common_info,
     windows=[{
         "script": "syncplayClient.py",
-        "icon_resources": [(1, "syncplay\\resources\\icon.ico")],
-        'dest_base': "Syncplay"},
+        "icon_resources": [(1, client_icon)],
+        'dest_base': client_name},
     ],
-    console=['syncplayServer.py', {"script":"syncplayClient.py", "icon_resources":[(1, "syncplay\\resources\\icon.ico")], 'dest_base': "SyncplayConsole"}],
+    console=[
+        'syncplayServer.py',
+        {"script": "syncplayClient.py", "icon_resources": [(1, client_icon)], 'dest_base': client_name + "Console"},
+    ],
 
     options={
         'py2exe': {

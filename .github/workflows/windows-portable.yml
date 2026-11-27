@@ -1,0 +1,91 @@
+name: SyncPlayU Windows portable
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-2022
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+          architecture: x64
+
+      - name: Install build dependencies
+        run: |
+          python -m pip install --upgrade pip wheel
+          python -m pip install -r requirements.txt "setuptools==70.3.0" "PySide6-Essentials==6.11.1" "py2exe==0.14.0.0" Pillow
+
+      - name: Run unit tests
+        run: python -m unittest discover -s tests
+
+      - name: Build portable ZIP
+        run: |
+          python -c "from PIL import Image; Image.open('syncplay/resources/syncplayu.png').save('syncplay/resources/syncplayu.ico')"
+          python buildPy2exe.py --portable-only
+          $version = python -c "import syncplay; print(syncplay.version)"
+          $app = "SyncPlayU"
+          Rename-Item "syncplay_v$version" $app
+          New-Item -Path $app -Name "syncplay.ini" -ItemType File | Out-Null
+          Copy-Item LICENSE $app
+          $versionInfo = python -c "import json; from syncplay.release import VERSION_INFO; print(json.dumps(VERSION_INFO))"
+          $sourceInfo = $versionInfo | ConvertFrom-Json -AsHashtable
+          $sourceInfo["source_commit"] = $env:GITHUB_SHA
+          $sourceInfo["architecture"] = "x64"
+          $sourceInfo | ConvertTo-Json | Set-Content "$app/build-info.json"
+          Compress-Archive -LiteralPath $app -DestinationPath "SyncPlayU-Windows-x64.zip"
+
+      - name: Test the extracted ZIP
+        run: |
+          Expand-Archive -LiteralPath "SyncPlayU-Windows-x64.zip" -DestinationPath "smoke-test"
+          $app = (Resolve-Path "smoke-test/SyncPlayU").Path
+          $expected = Get-Content "$app/build-info.json" -Raw | ConvertFrom-Json
+
+          $console = "$app/SyncPlayUConsole.exe"
+          $json = & $console --version-json
+          if ($LASTEXITCODE -ne 0) { throw "Console version check failed" }
+          $actual = $json | ConvertFrom-Json
+          if ($actual.upstream_version -ne $expected.upstream_version -or
+              $actual.night_version -ne $expected.night_version) {
+            throw "Packaged version differs from build metadata: $json"
+          }
+          $display = & $console --version
+          if ($LASTEXITCODE -ne 0 -or
+              $display -ne "SyncPlayU $($expected.upstream_version) (Night $($expected.night_version))") {
+            throw "Unexpected display version: $display"
+          }
+          Write-Output $display
+
+          $process = Start-Process -FilePath "$app/SyncPlayU.exe" -WorkingDirectory $app -PassThru
+          try {
+            $deadline = (Get-Date).AddSeconds(20)
+            do {
+              Start-Sleep -Milliseconds 500
+              $process.Refresh()
+              if ($process.HasExited) {
+                throw "Packaged GUI exited with code $($process.ExitCode)"
+              }
+            } until ($process.MainWindowTitle -like "*SyncPlayU*" -or (Get-Date) -gt $deadline)
+            if ($process.MainWindowTitle -notlike "*SyncPlayU*") {
+              throw "Expected the SyncPlayU configuration window, saw '$($process.MainWindowTitle)'"
+            }
+            Write-Output "Opened: $($process.MainWindowTitle)"
+          } finally {
+            if (-not $process.HasExited) { Stop-Process -Id $process.Id }
+          }
+
+      - uses: actions/upload-artifact@v6
+        with:
+          name: SyncPlayU-Windows-x64
+          path: SyncPlayU-Windows-x64.zip
+          if-no-files-found: error
+          compression-level: 0
