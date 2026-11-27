@@ -15,6 +15,7 @@ VIProductVersion "${FILE_VERSION}"
 VIAddVersionKey "ProductName" "SyncPlayU"
 VIAddVersionKey "FileDescription" "SyncPlayU Windows x64 Setup"
 VIAddVersionKey "CompanyName" "NightMachinery"
+VIAddVersionKey "LegalCopyright" "Syncplay and SyncPlayU contributors"
 VIAddVersionKey "FileVersion" "${FILE_VERSION}"
 VIAddVersionKey "ProductVersion" "${DISPLAY_VERSION}"
 
