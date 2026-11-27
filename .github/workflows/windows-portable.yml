@@ -65,23 +65,7 @@ jobs:
           }
           Write-Output $display
 
-          $process = Start-Process -FilePath "$app/SyncPlayU.exe" -WorkingDirectory $app -PassThru
-          try {
-            $deadline = (Get-Date).AddSeconds(20)
-            do {
-              Start-Sleep -Milliseconds 500
-              $process.Refresh()
-              if ($process.HasExited) {
-                throw "Packaged GUI exited with code $($process.ExitCode)"
-              }
-            } until ($process.MainWindowTitle -like "*SyncPlayU*" -or (Get-Date) -gt $deadline)
-            if ($process.MainWindowTitle -notlike "*SyncPlayU*") {
-              throw "Expected the SyncPlayU configuration window, saw '$($process.MainWindowTitle)'"
-            }
-            Write-Output "Opened: $($process.MainWindowTitle)"
-          } finally {
-            if (-not $process.HasExited) { Stop-Process -Id $process.Id }
-          }
+          python ci/windows-window-smoke.py "$app/SyncPlayU.exe"
 
       - uses: actions/upload-artifact@v6
         with:

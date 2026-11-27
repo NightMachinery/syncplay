@@ -20,6 +20,7 @@ from pathlib import Path
 
 from syncplay import constants
 from syncplay.messages import getMessage
+from syncplay.release import APP_NAME
 
 folderSearchEnabled = True
 
@@ -40,7 +41,7 @@ def isBSD():
 
 
 def isWindowsConsole():
-    return os.path.basename(sys.executable) == "SyncplayConsole.exe"
+    return os.path.basename(sys.executable).casefold() in ("syncplayconsole.exe", f"{APP_NAME}Console.exe".casefold())
 
 
 def getRuntimeDir():
